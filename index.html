@@ -190,6 +190,12 @@
   #tile-target.capped .sub { color: var(--warn); }
   .page { flex: 1; padding: 16px; max-width: 920px; width: 100%; margin: 0 auto; }
   #alert { cursor: pointer; }
+  #w-prompt { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 10px; padding: 10px 14px; border: 1px solid var(--accent); border-radius: 8px; font-size: 20px; font-weight: 600; }
+  #ed-rows .rep { font-weight: 600; }
+  #ed-rows .mini { padding: 8px 6px; font-size: 13px; }
+  .test-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 10px 0; }
+  .test-grid label { display: block; color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+  .test-grid input { width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
   #recover { margin: 12px 16px 0; padding: 12px 16px; border-radius: 8px; background: var(--panel); border: 1px solid var(--accent); display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 16px; }
   .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; margin-bottom: 8px; }
   .scatter { display: block; width: 100%; height: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
@@ -286,6 +292,13 @@
     <div><div class="label">Elapsed</div><div class="big" id="w-elapsed"></div></div>
     <div><div class="label">Remaining</div><div class="big" id="w-left"></div></div>
   </div>
+  <div id="w-prompt" hidden>
+    <span id="w-prompt-text"></span>
+    <span class="spacer"></span>
+    <button class="primary" id="btn-prompt-enter">Enter reading</button>
+    <button class="primary" id="btn-prompt-cool">Skip to cool down</button>
+    <button id="btn-prompt-dismiss">Dismiss</button>
+  </div>
   <svg class="profile" id="w-profile" viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true"></svg>
 </section>
 
@@ -357,6 +370,7 @@
     <div class="ed-foot">
       <button id="btn-add-steady">Add steady block</button>
       <button id="btn-add-ramp">Add ramp block</button>
+      <button id="btn-add-repeat">Add repeat</button>
       <span id="ed-total"></span>
       <span class="spacer"></span>
       <button id="btn-ed-cancel">Cancel</button>
@@ -485,6 +499,7 @@ const SETTINGS_KEY = 'erg.settings.v1';
 const DEFAULTS = {
   capOn: true, ceiling: 138, capWindow: 30, capDelay: 60, capStep: 5, capMargin: 5, capHold: 180, capGrace: 300,
   minW: 50, maxW: 400, smoothSecs: 3,
+  stopMmol: 4, testStart: 100, testStep: 20, testMins: 5, testCount: 6,
 };
 const settings = Object.assign({}, DEFAULTS, loadJson(SETTINGS_KEY, {}));
 
@@ -925,8 +940,12 @@ document.addEventListener('visibilitychange', () => {
 
 // ---------------------------------------------------------------- workouts
 
-// A workout is { id, name, blocks }. A block is either
-// { type: 'steady', watts, secs } or { type: 'ramp', from, to, secs }.
+// A workout is { id, name, blocks }. A block is one of
+//   { type: 'steady', watts, secs }
+//   { type: 'ramp', from, to, secs }
+//   { type: 'repeat', times, blocks }   where the inner blocks are steady or ramp.
+// A running workout uses the flat list from flatBlocks. Its blocks may carry
+// rep: { n, of, label } and, for lactate step tests, sample: true.
 
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const ramp = (from, to, mins) => ({ type: 'ramp', from, to, secs: mins * 60 });
@@ -946,16 +965,39 @@ function cleanWatts(v) {
 }
 
 function cleanBlock(b) {
+  if (b.type === 'repeat') {
+    const times = Number.isFinite(Number(b.times)) ? Math.round(clamp(Number(b.times), 1, 50)) : 2;
+    const inner = (Array.isArray(b.blocks) ? b.blocks : []).filter((c) => c && c.type !== 'repeat').map(cleanBlock);
+    return { type: 'repeat', times, blocks: inner };
+  }
   const secs = Number.isFinite(Number(b.secs)) ? Math.max(5, Math.round(Number(b.secs))) : 60;
-  if (b.type === 'ramp') return { type: 'ramp', from: cleanWatts(b.from), to: cleanWatts(b.to), secs };
-  return { type: 'steady', watts: cleanWatts(b.watts), secs };
+  const out = b.type === 'ramp'
+    ? { type: 'ramp', from: cleanWatts(b.from), to: cleanWatts(b.to), secs }
+    : { type: 'steady', watts: cleanWatts(b.watts), secs };
+  if (b.rep && Number.isFinite(Number(b.rep.n)) && Number.isFinite(Number(b.rep.of))) {
+    out.rep = { n: Number(b.rep.n), of: Number(b.rep.of), label: b.rep.label === 'Step' ? 'Step' : 'Rep' };
+  }
+  if (b.sample) out.sample = true;
+  return out;
+}
+
+// Expands repeats into the plain list of blocks the run engine walks through.
+function flatBlocks(w) {
+  const out = [];
+  for (const b of w.blocks) {
+    if (b.type !== 'repeat') { out.push(b); continue; }
+    for (let n = 1; n <= b.times; n++) {
+      for (const c of b.blocks) out.push(Object.assign({}, c, { rep: { n, of: b.times, label: 'Rep' } }));
+    }
+  }
+  return out;
 }
 
 function cleanWorkout(w) {
   return {
     id: String(w.id || newId()),
     name: String(w.name || '').trim().slice(0, 80) || 'Untitled workout',
-    blocks: (Array.isArray(w.blocks) ? w.blocks : []).map(cleanBlock),
+    blocks: (Array.isArray(w.blocks) ? w.blocks : []).filter(Boolean).map(cleanBlock),
   };
 }
 
@@ -984,7 +1026,7 @@ function saveWorkouts() {
 let workouts = loadWorkouts();
 let draft = null;      // workout being edited in the builder
 
-const totalSecs = (w) => w.blocks.reduce((sum, b) => sum + b.secs, 0);
+const totalSecs = (w) => flatBlocks(w).reduce((sum, b) => sum + b.secs, 0);
 const startWatts = (b) => (b.type === 'ramp' ? b.from : b.watts);
 const endWatts = (b) => (b.type === 'ramp' ? b.to : b.watts);
 
@@ -1013,8 +1055,12 @@ function blockName(w, i) {
 
 function describeBlock(w, i) {
   const b = w.blocks[i];
-  const watts = b.type === 'ramp' ? b.from + ' to ' + b.to + ' W' : b.watts + ' W';
-  return blockName(w, i) + ' ' + watts;
+  const watts = (c) => (c.type === 'ramp' ? c.from + ' to ' + c.to + ' W' : c.watts + ' W');
+  if (b.type === 'repeat') {
+    return b.times + ' x (' + b.blocks.map((c) => (c.type === 'ramp' ? 'Ramp ' : 'Steady ') + watts(c)).join(', ') + ')';
+  }
+  const rep = b.rep ? b.rep.label + ' ' + b.rep.n + ' of ' + b.rep.of + ', ' : '';
+  return rep + blockName(w, i) + ' ' + watts(b);
 }
 
 function fmtShort(ms) {
@@ -1026,12 +1072,13 @@ function fmtShort(ms) {
 
 // Inner SVG for a workout profile in a 1000 x 100 box. All inputs are numbers.
 function profileMarkup(w, progressMs) {
+  const blocks = flatBlocks(w);
   const total = totalSecs(w) || 1;
-  const top = Math.max(100, ...w.blocks.map((b) => Math.max(startWatts(b), endWatts(b)))) * 1.1;
+  const top = Math.max(100, ...blocks.map((b) => Math.max(startWatts(b), endWatts(b)))) * 1.1;
   const y = (v) => (100 - v / top * 100).toFixed(1);
   let t = 0;
   let out = '';
-  for (const b of w.blocks) {
+  for (const b of blocks) {
     const x0 = (t / total * 1000).toFixed(1);
     t += b.secs;
     const x1 = (t / total * 1000).toFixed(1);
@@ -1086,12 +1133,57 @@ function renderWorkouts() {
       el('div', { class: 'wk-dur', text: parts }),
       profileSvg(w),
       el('div', { class: 'wk-actions' },
-        el('button', { class: 'primary', text: 'Ride', disabled: !w.blocks.length, onclick: () => loadRun(w) }),
+        el('button', { class: 'primary', text: 'Ride', disabled: !totalSecs(w), onclick: () => loadRun(w) }),
         el('button', { text: 'Edit', onclick: () => { draft = JSON.parse(JSON.stringify(w)); renderWorkouts(); } }),
         el('button', { text: 'Duplicate', onclick: () => duplicateWorkout(w) }),
         el('button', { text: 'Export', onclick: () => exportWorkouts([w], fileSlug(w.name) + '.json') }),
         el('button', { text: 'Delete', onclick: () => deleteWorkout(w) }))));
   }
+  list.append(stepTestCard());
+}
+
+// ---- guided lactate step test
+
+function stepTestWorkout() {
+  const start = settings.testStart;
+  const easy = Math.max(settings.minW, start - 30);
+  const blocks = [{ type: 'ramp', from: easy, to: start, secs: 600 }];
+  for (let n = 1; n <= settings.testCount; n++) {
+    blocks.push({ type: 'steady', watts: start + (n - 1) * settings.testStep, secs: settings.testMins * 60,
+      rep: { n, of: settings.testCount, label: 'Step' }, sample: true });
+  }
+  blocks.push({ type: 'ramp', from: start + (settings.testCount - 1) * settings.testStep, to: easy, secs: 300 });
+  return cleanWorkout({ id: 'lactate-step-test', name: 'Lactate step test', blocks });
+}
+
+function stepTestCard() {
+  const w = stepTestWorkout();
+  const top = endWatts(w.blocks[w.blocks.length - 2]);
+  const field = (key, label, lo, hi) => el('div', null,
+    el('label', { for: 'test-' + key, text: label }),
+    el('input', {
+      id: 'test-' + key, type: 'number', min: lo, max: hi, value: settings[key],
+      onchange: (e) => {
+        const v = Math.round(clamp(Number(e.target.value), lo, hi));
+        if (Number.isFinite(v)) { settings[key] = v; saveJson(SETTINGS_KEY, settings); }
+        renderWorkouts();
+      },
+    }));
+  return el('div', { class: 'wk' },
+    el('div', { class: 'wk-head' },
+      el('div', { class: 'wk-name', text: 'Lactate step test' }),
+      el('div', { class: 'wk-dur', text: fmtShort(totalSecs(w) * 1000) + ' total' })),
+    el('div', { class: 'wk-dur', text: 'Ten minute warm up, then ' + settings.testCount + ' steps of ' + settings.testMins + ' min from ' + settings.testStart + ' to ' + top +
+      ' W, then a cool down. The app asks for a sample in the last 30 seconds of each step and for the reading when the step ends. ' +
+      'It suggests the cool down once a reading reaches ' + settings.stopMmol + ' mmol/L.' }),
+    el('div', { class: 'test-grid' },
+      field('testStart', 'First step (W)', 50, 400),
+      field('testStep', 'Step size (W)', 5, 60),
+      field('testMins', 'Step length (min)', 2, 15),
+      field('testCount', 'Number of steps', 2, 15)),
+    profileSvg(w),
+    el('div', { class: 'wk-actions' },
+      el('button', { class: 'primary', text: 'Ride step test', onclick: () => loadRun(w) })));
 }
 
 function duplicateWorkout(w) {
@@ -1156,23 +1248,43 @@ function renderEditor() {
   rows.replaceChildren();
   for (const h of ['', 'Type', 'Watts', 'End watts', 'Min', 'Sec', '']) rows.append(el('div', { class: 'h', text: h }));
 
-  draft.blocks.forEach((b, i) => {
-    const n = i + 1;
-    const field = (value, label, onValue, max) => el('input', {
-      type: 'number', inputmode: 'numeric', min: 0, max, value, 'aria-label': 'Block ' + n + ' ' + label,
-      oninput: (e) => { onValue(e.target.value === '' ? NaN : Number(e.target.value)); refreshDraft(); },
-    });
-    const isRamp = b.type === 'ramp';
-    const mins = field(Math.floor(b.secs / 60), 'minutes', () => setSecs(), 600);
-    const secs = field(b.secs % 60, 'seconds', () => setSecs(), 59);
-    const setSecs = () => { b.secs = (Number(mins.value) || 0) * 60 + (Number(secs.value) || 0); };
+  const field = (n, value, label, onValue, max) => el('input', {
+    type: 'number', inputmode: 'numeric', min: 0, max, value, 'aria-label': 'Block ' + n + ' ' + label,
+    oninput: (e) => { onValue(e.target.value === '' ? NaN : Number(e.target.value)); refreshDraft(); },
+  });
 
+  const addRows = (list, prefix) => list.forEach((b, i) => {
+    const n = prefix + (i + 1);
+    const ops = el('div', { class: 'ops' },
+      el('button', { text: 'Up', disabled: i === 0, 'aria-label': 'Move block ' + n + ' up', onclick: () => moveBlock(list, i, -1) }),
+      el('button', { text: 'Down', disabled: i === list.length - 1, 'aria-label': 'Move block ' + n + ' down', onclick: () => moveBlock(list, i, 1) }),
+      el('button', { text: 'Delete', 'aria-label': 'Delete block ' + n, onclick: () => { list.splice(i, 1); renderEditor(); } }));
+
+    if (b.type === 'repeat') {
+      const last = b.blocks[b.blocks.length - 1];
+      const w = last ? endWatts(cleanBlock(last)) : 150;
+      rows.append(
+        el('div', { class: 'n', text: n }),
+        el('div', { class: 'rep', text: 'Repeat' }),
+        field(n, b.times, 'repeat count', (v) => { b.times = v; }, 50),
+        el('div', { class: 'n', text: 'times' }),
+        el('button', { class: 'mini', text: '+ Steady', 'aria-label': 'Add a steady block inside repeat ' + n, onclick: () => { b.blocks.push({ type: 'steady', watts: w, secs: 120 }); renderEditor(); } }),
+        el('button', { class: 'mini', text: '+ Ramp', 'aria-label': 'Add a ramp block inside repeat ' + n, onclick: () => { b.blocks.push({ type: 'ramp', from: w, to: w, secs: 120 }); renderEditor(); } }),
+        ops);
+      addRows(b.blocks, n + '.');
+      return;
+    }
+
+    const isRamp = b.type === 'ramp';
+    const setSecs = () => { b.secs = (Number(mins.value) || 0) * 60 + (Number(secs.value) || 0); };
+    const mins = field(n, Math.floor(b.secs / 60), 'minutes', () => setSecs(), 600);
+    const secs = field(n, b.secs % 60, 'seconds', () => setSecs(), 59);
     rows.append(
       el('div', { class: 'n', text: n }),
       el('select', {
         'aria-label': 'Block ' + n + ' type',
         onchange: (e) => {
-          draft.blocks[i] = e.target.value === 'ramp'
+          list[i] = e.target.value === 'ramp'
             ? { type: 'ramp', from: startWatts(b), to: endWatts(b), secs: b.secs }
             : { type: 'steady', watts: endWatts(b), secs: b.secs };
           renderEditor();
@@ -1180,28 +1292,28 @@ function renderEditor() {
       },
         el('option', { value: 'steady', text: 'Steady', selected: !isRamp }),
         el('option', { value: 'ramp', text: 'Ramp', selected: isRamp })),
-      field(startWatts(b), isRamp ? 'start watts' : 'watts', (v) => { if (isRamp) b.from = v; else b.watts = v; }, settings.maxW),
-      isRamp ? field(b.to, 'end watts', (v) => { b.to = v; }, settings.maxW) : el('div'),
+      field(n, startWatts(b), isRamp ? 'start watts' : 'watts', (v) => { if (isRamp) b.from = v; else b.watts = v; }, settings.maxW),
+      isRamp ? field(n, b.to, 'end watts', (v) => { b.to = v; }, settings.maxW) : el('div'),
       mins,
       secs,
-      el('div', { class: 'ops' },
-        el('button', { text: 'Up', disabled: i === 0, 'aria-label': 'Move block ' + n + ' up', onclick: () => moveBlock(i, -1) }),
-        el('button', { text: 'Down', disabled: i === draft.blocks.length - 1, 'aria-label': 'Move block ' + n + ' down', onclick: () => moveBlock(i, 1) }),
-        el('button', { text: 'Delete', 'aria-label': 'Delete block ' + n, onclick: () => { draft.blocks.splice(i, 1); renderEditor(); } })));
+      ops);
   });
+  addRows(draft.blocks, '');
   refreshDraft();
 }
 
-function moveBlock(i, dir) {
-  const [b] = draft.blocks.splice(i, 1);
-  draft.blocks.splice(i + dir, 0, b);
+function moveBlock(list, i, dir) {
+  const [b] = list.splice(i, 1);
+  list.splice(i + dir, 0, b);
   renderEditor();
 }
 
 function addBlock(type) {
-  const last = draft.blocks[draft.blocks.length - 1];
-  const w = last ? endWatts(cleanBlock(last)) : 100;
-  draft.blocks.push(type === 'ramp' ? { type: 'ramp', from: w, to: w, secs: 300 } : { type: 'steady', watts: w, secs: 600 });
+  const flat = flatBlocks(cleanWorkout(draft));
+  const w = flat.length ? endWatts(flat[flat.length - 1]) : 100;
+  if (type === 'ramp') draft.blocks.push({ type: 'ramp', from: w, to: w, secs: 300 });
+  else if (type === 'repeat') draft.blocks.push({ type: 'repeat', times: 4, blocks: [{ type: 'steady', watts: cleanWatts(w + 40), secs: 180 }, { type: 'steady', watts: w, secs: 120 }] });
+  else draft.blocks.push({ type: 'steady', watts: w, secs: 600 });
   renderEditor();
 }
 
@@ -1209,7 +1321,7 @@ function refreshDraft() {
   const preview = cleanWorkout(draft);
   $('ed-profile').innerHTML = profileMarkup(preview);
   $('ed-total').textContent = 'Total ' + fmtShort(totalSecs(preview) * 1000);
-  $('btn-ed-save').disabled = !preview.blocks.length;
+  $('btn-ed-save').disabled = !totalSecs(preview);
 }
 
 function saveDraft() {
@@ -1244,7 +1356,10 @@ function showView(name) {
 function loadRun(w) {
   if (run && run.status !== 'ready' && run.status !== 'done' &&
       !confirm('A workout is in progress. Replace it with "' + w.name + '"?')) return;
-  run = { workout: cleanWorkout(w), status: 'ready', elapsedMs: 0, offset: 0, blockIndex: -1, lastSendAt: 0, zeroSince: null };
+  const clean = cleanWorkout(w);
+  const blocks = flatBlocks(clean);
+  if (!blocks.length) return;
+  run = { workout: { id: clean.id, name: clean.name, blocks }, status: 'ready', elapsedMs: 0, offset: 0, blockIndex: -1, lastSendAt: 0, zeroSince: null };
   log('Loaded workout: ' + run.workout.name);
   showView('ride');
   render();
@@ -1254,6 +1369,9 @@ function sendRunTarget(force) {
   const pos = blockAt(run.workout, run.elapsedMs);
   if (!pos) return;
   if (pos.i !== run.blockIndex) {
+    // A finished step of a lactate test: keep its numbers so the reading is tied to it.
+    const prev = run.workout.blocks[run.blockIndex];
+    if (prev && prev.sample && rec) run.stepPrompt = lactateContext(describeBlock(run.workout, run.blockIndex));
     run.blockIndex = pos.i;
     force = true;
     log('Block ' + (pos.i + 1) + ': ' + describeBlock(run.workout, pos.i));
@@ -1295,6 +1413,7 @@ function skipBlock() {
   const pos = blockAt(run.workout, run.elapsedMs);
   if (!pos) return;
   run.elapsedMs = pos.start + pos.b.secs * 1000;
+  run.blockIndex = -1;
   if (run.elapsedMs >= totalSecs(run.workout) * 1000) holdRun('done', 'Workout complete');
   else if (run.status === 'running') sendRunTarget(true);
   render();
@@ -1303,6 +1422,18 @@ function skipBlock() {
 function endRun() {
   if (!run || run.status === 'done' || run.status === 'ready') return;
   if (confirm('End the workout and save the ride?')) holdRun('done', 'Workout ended early');
+}
+
+function skipToCooldown() {
+  if (!run || run.status === 'done') return;
+  const last = run.workout.blocks.length - 1;
+  run.elapsedMs = run.workout.blocks.slice(0, last).reduce((sum, b) => sum + b.secs * 1000, 0);
+  run.stopHint = null;
+  run.stepPrompt = null;
+  run.blockIndex = -1;
+  log('Skipped to the cool down');
+  if (run.status === 'running') sendRunTarget(true);
+  render();
 }
 
 function closeRun() {
@@ -1368,6 +1499,19 @@ function renderRun() {
   $('w-elapsed').textContent = fmtShort(Math.floor(Math.min(run.elapsedMs, total) / 1000) * 1000);
   $('w-left').textContent = fmtShort(total - Math.min(run.elapsedMs, total));
   $('w-profile').innerHTML = profileMarkup(w, run.elapsedMs);
+
+  // Lactate step test prompts.
+  const isLast = pos.i === w.blocks.length - 1;
+  let prompt = '';
+  if (!done && run.stopHint != null && !isLast) prompt = 'Reading of ' + run.stopHint + ' mmol/L has reached the stop value of ' + settings.stopMmol + '.';
+  else if (!done && run.stepPrompt) prompt = run.stepPrompt.block + ' finished. Enter its lactate reading.';
+  else if (run.status === 'running' && pos.b.sample && pos.b.secs * 1000 - pos.into <= 30000) prompt = 'Take a lactate sample now.';
+  const stopping = prompt && run.stopHint != null && !isLast;
+  $('w-prompt').hidden = !prompt;
+  $('w-prompt-text').textContent = prompt;
+  $('btn-prompt-cool').hidden = !stopping;
+  $('btn-prompt-enter').hidden = stopping || !run.stepPrompt;
+  $('btn-prompt-dismiss').hidden = !(stopping || run.stepPrompt);
 
   $('btn-go').textContent = { ready: 'Start', running: 'Pause', paused: 'Resume', autopaused: 'Resume', done: 'Restart' }[run.status];
   $('btn-skip').disabled = done;
@@ -1655,17 +1799,24 @@ function avgOver(samples, end, secs, col) {
   return mean(samples.slice(Math.max(0, end - secs), end).map((s) => s[col]).filter((v) => v != null));
 }
 
-function openLactateDialog() {
-  if (!rec || $('dlg-lactate').open) return;
+function lactateContext(block) {
   const n = rec.samples.length;
-  const inWorkout = run && run.status !== 'ready';
-  const pos = inWorkout ? blockAt(run.workout, run.elapsedMs) : null;
-  pendingLactate = {
-    rideId: rec.id, rideName: rec.name, t: Date.now(), elapsed: n,
-    block: pos ? describeBlock(run.workout, pos.i) : 'Free ride',
+  return {
+    rideId: rec.id, rideName: rec.name, t: Date.now(), elapsed: n, block,
     power: avgOver(rec.samples, n, 60, 1), hr: avgOver(rec.samples, n, 60, 2),
   };
-  $('lac-context').textContent = 'At ' + fmtShort(n * 1000) + ', ' + pendingLactate.block + '. 60 s average: ' +
+}
+
+// With no context the reading belongs to this moment. A step test passes the finished step.
+function openLactateDialog(context) {
+  if (!rec || $('dlg-lactate').open) return;
+  if (context && context.rideId) {
+    pendingLactate = context;
+  } else {
+    const pos = run && run.status !== 'ready' ? blockAt(run.workout, run.elapsedMs) : null;
+    pendingLactate = lactateContext(pos ? describeBlock(run.workout, pos.i) : 'Free ride');
+  }
+  $('lac-context').textContent = 'At ' + fmtShort(pendingLactate.elapsed * 1000) + ', ' + pendingLactate.block + '. 60 s average: ' +
     fmtNum(pendingLactate.power, ' W') + ', ' + fmtNum(pendingLactate.hr, ' bpm') + '.';
   $('lac-value').value = '';
   $('dlg-lactate').showModal();
@@ -1676,10 +1827,15 @@ function saveLactateDialog(e) {
   const mmol = Number($('lac-value').value);
   if (!pendingLactate || !(mmol > 0 && mmol <= 30)) return;
   lactate.push(Object.assign({ id: newId(), mmol }, pendingLactate));
+  if (run) {
+    if (run.stepPrompt === pendingLactate) run.stepPrompt = null;
+    if (run.workout.blocks.some((b) => b.sample) && mmol >= settings.stopMmol) run.stopHint = mmol;
+  }
   pendingLactate = null;
   saveJson(LACTATE_KEY, lactate);
   log('Lactate logged: ' + mmol + ' mmol/L');
   $('dlg-lactate').close();
+  render();
 }
 
 function lactateChanged() {
@@ -1902,6 +2058,72 @@ function buildTcx(ride) {
   ].filter(Boolean).join('\n') + '\n';
 }
 
+// FIT file: header, one message per second, then lap, session and activity
+// summaries, all little endian, with the standard FIT CRC at the end.
+function buildFit(ride) {
+  const st = ride.stats;
+  const S = ride.samples;
+  const stamp = (ms) => Math.round(ms / 1000) - 631065600;      // seconds since 31 Dec 1989 UTC
+  const T = { enum: [1, 0x00], u8: [1, 0x02], u16: [2, 0x84], u32: [4, 0x86], u32z: [4, 0x8c] };
+  const NONE = { 1: 0xff, 2: 0xffff, 4: 0xffffffff };
+  const bytes = [];
+  const put = (v, size) => { for (let i = 0; i < size; i++) bytes.push(Math.floor(v / Math.pow(256, i)) % 256); };
+  const define = (local, global, fields) => {
+    bytes.push(0x40 | local, 0, 0);
+    put(global, 2);
+    bytes.push(fields.length);
+    for (const [num, type] of fields) bytes.push(num, T[type][0], T[type][1]);
+  };
+  const data = (local, fields) => {
+    bytes.push(local);
+    for (const [, type, v] of fields) put(v == null || !Number.isFinite(v) ? NONE[T[type][0]] : Math.max(0, Math.round(v)), T[type][0]);
+  };
+  const message = (local, global, fields) => { define(local, global, fields); data(local, fields); };
+
+  const start = stamp(ride.startedAt);
+  const end = stamp(S[S.length - 1][0]);
+  const maxP = Math.max(...S.map((s) => s[1] || 0));
+
+  message(0, 0, [[0, 'enum', 4], [1, 'u16', 255], [2, 'u16', 0], [3, 'u32z', 1], [4, 'u32', start]]);            // file_id: activity
+  message(1, 21, [[253, 'u32', start], [0, 'enum', 0], [1, 'enum', 0]]);                                          // event: timer start
+
+  const record = (s) => [[253, 'u32', stamp(s[0])], [3, 'u8', s[2]], [4, 'u8', s[3] == null ? null : Math.min(254, s[3])], [7, 'u16', s[1]]];
+  define(2, 20, record(S[0]));
+  for (const s of S) data(2, record(s));
+
+  message(1, 21, [[253, 'u32', end], [0, 'enum', 0], [1, 'enum', 4]]);                                            // event: timer stop
+  message(3, 19, [[253, 'u32', end], [0, 'enum', 9], [1, 'enum', 1], [2, 'u32', start],                           // lap
+    [7, 'u32', st.elapsedSecs * 1000], [8, 'u32', st.secs * 1000], [11, 'u16', st.kj],
+    [15, 'u8', st.avgHr], [16, 'u8', st.maxHr], [17, 'u8', st.avgCad], [19, 'u16', st.avgP], [20, 'u16', maxP], [25, 'enum', 2]]);
+  message(4, 18, [[253, 'u32', end], [0, 'enum', 8], [1, 'enum', 1], [2, 'u32', start], [5, 'enum', 2], [6, 'enum', 58],  // session: cycling, virtual activity
+    [7, 'u32', st.elapsedSecs * 1000], [8, 'u32', st.secs * 1000], [11, 'u16', st.kj],
+    [16, 'u8', st.avgHr], [17, 'u8', st.maxHr], [18, 'u8', st.avgCad], [20, 'u16', st.avgP], [21, 'u16', maxP],
+    [25, 'u16', 0], [26, 'u16', 1], [34, 'u16', st.np], [48, 'u32', st.kj * 1000]]);
+  message(5, 34, [[253, 'u32', end], [0, 'u32', st.secs * 1000], [1, 'u16', 1], [2, 'enum', 0], [3, 'enum', 26], [4, 'enum', 1]]);  // activity
+
+  const table = [0x0000, 0xcc01, 0xd801, 0x1400, 0xf001, 0x3c00, 0x2800, 0xe401, 0xa001, 0x6c00, 0x7800, 0xb401, 0x5000, 0x9c01, 0x8801, 0x4400];
+  const crc16 = (list) => {
+    let crc = 0;
+    for (const b of list) {
+      let tmp = table[crc & 0xf];
+      crc = (crc >> 4) & 0x0fff;
+      crc = crc ^ tmp ^ table[b & 0xf];
+      tmp = table[crc & 0xf];
+      crc = (crc >> 4) & 0x0fff;
+      crc = crc ^ tmp ^ table[(b >> 4) & 0xf];
+    }
+    return crc;
+  };
+  const size = bytes.length;
+  const header = [14, 0x20, 2132 & 0xff, 2132 >> 8, size & 0xff, (size >> 8) & 0xff, (size >> 16) & 0xff, (size >> 24) & 0xff, 0x2e, 0x46, 0x49, 0x54];
+  const headCrc = crc16(header);
+  header.push(headCrc & 0xff, headCrc >> 8);
+  const all = header.concat(bytes);
+  const fileCrc = crc16(all);
+  all.push(fileCrc & 0xff, fileCrc >> 8);
+  return new Uint8Array(all);
+}
+
 function tcxFileName(ride) {
   const d = new Date(ride.startedAt);
   const pad = (v) => String(v).padStart(2, '0');
@@ -1947,6 +2169,7 @@ function renderSummary() {
     el('div', { class: 'pane-head' },
       el('h2', { text: ride.name }),
       el('button', { text: 'All rides', onclick: () => showView('rides') }),
+      el('button', { text: 'Download FIT', disabled: !has, onclick: () => download(tcxFileName(ride).replace(/\.tcx$/, '.fit'), buildFit(ride), 'application/vnd.ant.fit') }),
       el('button', { class: 'primary', text: 'Download TCX', disabled: !has, onclick: () => download(tcxFileName(ride), buildTcx(ride), 'application/vnd.garmin.tcx+xml') })),
     el('div', { class: 'note', text: fmtDate(ride.startedAt) + (has ? '' : '. Samples were dropped to save space, so this ride can no longer be exported.') }),
     el('div', { class: 'stats' },
@@ -2203,6 +2426,7 @@ const SETTING_FIELDS = [
   ['minW', 'Lowest target the app may send (W)', 0, 200],
   ['maxW', 'Highest target the app may send (W)', 100, 1000],
   ['smoothSecs', 'Power smoothing (s)', [1, 3, 5]],
+  ['stopMmol', 'Step test: suggest stopping at this lactate (mmol/L)', 2, 10],
 ];
 
 function setSetting(key, value) {
@@ -2396,6 +2620,10 @@ window.addEventListener('beforeunload', (e) => {
 });
 $('btn-add-steady').addEventListener('click', () => addBlock('steady'));
 $('btn-add-ramp').addEventListener('click', () => addBlock('ramp'));
+$('btn-add-repeat').addEventListener('click', () => addBlock('repeat'));
+$('btn-prompt-enter').addEventListener('click', () => { if (run && run.stepPrompt) openLactateDialog(run.stepPrompt); });
+$('btn-prompt-cool').addEventListener('click', skipToCooldown);
+$('btn-prompt-dismiss').addEventListener('click', () => { if (run) { run.stepPrompt = null; run.stopHint = null; render(); } });
 $('btn-ed-cancel').addEventListener('click', () => { draft = null; renderWorkouts(); });
 $('btn-ed-save').addEventListener('click', saveDraft);
 $('ed-name').addEventListener('input', (e) => { draft.name = e.target.value; });
