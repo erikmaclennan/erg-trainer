@@ -591,15 +591,35 @@ class BleDevice {
 
   async open(st) {
     hub.conn(this.kind, st, this.name);
-    const server = await this.device.gatt.connect();
-    await this.setup(server);
+    // Chrome on macOS often fails the first GATT attempt for no stated reason, so try a few times.
+    this.opening = true;
+    try {
+      for (let attempt = 1; ; attempt++) {
+        try {
+          this.stage = 'connecting';
+          const server = await this.device.gatt.connect();
+          this.stage = 'reading its services';
+          await this.setup(server);
+          break;
+        } catch (err) {
+          log(this.label + ' attempt ' + attempt + ' failed while ' + this.stage + ': ' + err.message, 'err');
+          try { if (this.device.gatt.connected) this.device.gatt.disconnect(); } catch (e) { /* already gone */ }
+          if (attempt >= 3 || this.closing) throw new Error(err.message + ' (while ' + this.stage + ', after ' + attempt + ' attempts)');
+          await sleep(1000);
+        }
+      }
+    } finally {
+      this.opening = false;
+    }
     hub.conn(this.kind, 'on', this.name);
     log(this.label + ' connected: ' + this.name);
     this.ready();
   }
 
   async notify(service, uuid, handler) {
+    this.stage = 'reading characteristic 0x' + uuid.toString(16);
     const ch = await service.getCharacteristic(uuid);
+    this.stage = 'subscribing to 0x' + uuid.toString(16);
     ch.addEventListener('characteristicvaluechanged', (e) => {
       try { handler(e.target.value); } catch (err) { log(this.label + ' sent data that could not be read: ' + err.message, 'err'); }
     });
@@ -613,7 +633,7 @@ class BleDevice {
 
   async dropped() {
     this.lost();
-    if (this.closing || this.retrying) return;
+    if (this.closing || this.retrying || this.opening) return;
     this.retrying = true;
     log(this.label + ' disconnected. Trying to reconnect.', 'err');
     while (!this.closing) {

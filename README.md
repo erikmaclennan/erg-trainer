@@ -37,3 +37,4 @@ Always open the app at the same address. Saved workouts, rides and the Strava co
 
 - Close the Wahoo app and any other cycling app. The KICKR Core accepts a limited number of Bluetooth connections.
 - Free the heart rate strap from the watch or phone if it allows only one connection.
+- Garmin HRM 600: switch the strap to its open Bluetooth connection type first. In secure mode the app connects but is refused heart rate data ("GATT operation failed ... while subscribing to 0x2a37").
