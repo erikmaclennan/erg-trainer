@@ -8,6 +8,7 @@ A single-page web app that runs steady ERG workouts on a Wahoo KICKR Core from C
 - M2 workouts: builder with presets saved in the browser, run controls (start, pause, skip, end), ramps, manual offset, auto-pause.
 - M3 recording: heart rate cap, one-second ride recording, ride summary, TCX download, lactate log with CSV export, settings.
 - M4 Strava: one-time connection, direct upload from the ride summary, duplicate warning.
+- M5 polish: ride recovery after a reload, screen wake lock, low cadence (ERG spiral) guard, workout import and export, lactate charts.
 
 ## Run
 

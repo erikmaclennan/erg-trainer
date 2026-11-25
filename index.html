@@ -189,6 +189,18 @@
   #tile-hr.over .value { color: var(--bad); }
   #tile-target.capped .sub { color: var(--warn); }
   .page { flex: 1; padding: 16px; max-width: 920px; width: 100%; margin: 0 auto; }
+  #alert { cursor: pointer; }
+  #recover { margin: 12px 16px 0; padding: 12px 16px; border-radius: 8px; background: var(--panel); border: 1px solid var(--accent); display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 16px; }
+  .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; margin-bottom: 8px; }
+  .scatter { display: block; width: 100%; height: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+  .scatter text { fill: var(--muted); font-size: 11px; font-family: inherit; }
+  .scatter .grid { stroke: var(--line); stroke-width: 1; }
+  .scatter .ref { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 4; }
+  .scatter .ttl { fill: var(--text); font-size: 12px; font-weight: 600; }
+  .scatter polyline { fill: none; stroke-width: 1.5; stroke-opacity: 0.6; }
+  .scatter circle { stroke: var(--panel); stroke-width: 1.5; }
+  .keys { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+  .keys i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
   .page a { color: var(--accent); }
   .page textarea { width: 100%; min-height: 90px; resize: vertical; font: inherit; color: inherit; }
   .field { display: block; margin: 10px 0 4px; color: var(--muted); font-size: 14px; }
@@ -257,9 +269,11 @@
   <button id="btn-lactate" disabled>Log lactate</button>
 </header>
 
-<div id="view-ride">
 <div id="notice" hidden></div>
-<div id="alert" role="alert" hidden></div>
+<div id="alert" role="alert" title="Click to dismiss" hidden></div>
+<div id="recover" hidden></div>
+
+<div id="view-ride">
 
 <section id="strip" hidden>
   <div class="strip-row">
@@ -327,6 +341,9 @@
   <div id="wk-list-pane">
     <div class="pane-head">
       <h2>Workouts</h2>
+      <button id="btn-import">Import</button>
+      <button id="btn-export-all">Export all</button>
+      <input id="file-import" type="file" accept=".json,application/json" hidden>
       <button id="btn-presets">Restore presets</button>
       <button class="primary" id="btn-new">New workout</button>
     </div>
@@ -779,6 +796,7 @@ class SimTrainer {
     this.canControl = true;
     this.goal = null;
     this.coast = false;
+    this.slow = false;             // set from the console to test the low cadence guard
     this.watts = 0;
     this.bpm = 68;
     hub.conn('trainer', 'sim', 'Simulated trainer');
@@ -793,7 +811,7 @@ class SimTrainer {
     const w = stopped ? 0 : Math.max(0, Math.round(this.watts + (Math.random() - 0.5) * 8));
     this.bpm += ((62 + w * 0.41) - this.bpm) / 40;
     hub.power(w);
-    hub.cadence(stopped ? 0 : 88 + Math.round((Math.random() - 0.5) * 4));
+    hub.cadence(stopped ? 0 : (this.slow ? 42 : 88) + Math.round((Math.random() - 0.5) * 4));
     hub.hr(Math.round(this.bpm));
   }
   setTarget(w) {
@@ -822,7 +840,8 @@ function applyTarget(w, noCap) {
 function pushTarget() {
   if (state.base == null) return;
   const cut = state.noCap ? 0 : cap.watts;
-  const w = Math.round(clamp(state.base + cut, settings.minW, settings.maxW));
+  const eased = !state.noCap && spiral.until != null ? SPIRAL.factor : 1;
+  const w = Math.round(clamp((state.base + cut) * eased, settings.minW, settings.maxW));
   state.target = w;
   $('target-input').value = state.base;
   if (trainer && trainer.canControl) {
@@ -1070,6 +1089,7 @@ function renderWorkouts() {
         el('button', { class: 'primary', text: 'Ride', disabled: !w.blocks.length, onclick: () => loadRun(w) }),
         el('button', { text: 'Edit', onclick: () => { draft = JSON.parse(JSON.stringify(w)); renderWorkouts(); } }),
         el('button', { text: 'Duplicate', onclick: () => duplicateWorkout(w) }),
+        el('button', { text: 'Export', onclick: () => exportWorkouts([w], fileSlug(w.name) + '.json') }),
         el('button', { text: 'Delete', onclick: () => deleteWorkout(w) }))));
   }
 }
@@ -1086,6 +1106,40 @@ function deleteWorkout(w) {
   workouts = workouts.filter((x) => x !== w);
   saveWorkouts();
   renderWorkouts();
+}
+
+function fileSlug(name) {
+  return String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'workout';
+}
+
+function exportWorkouts(list, fileName) {
+  download(fileName, JSON.stringify({ app: 'erg-trainer', version: 1, workouts: list }, null, 2) + '\n', 'application/json');
+}
+
+// Accepts a file made by Export, a bare list of workouts, or a single workout.
+async function importWorkouts(file) {
+  try {
+    const data = JSON.parse(await file.text());
+    const list = Array.isArray(data) ? data : data && Array.isArray(data.workouts) ? data.workouts : data && data.blocks ? [data] : null;
+    if (!list) throw new Error('the file has no workouts in it');
+    let added = 0;
+    for (const raw of list) {
+      if (!raw || !Array.isArray(raw.blocks) || !raw.blocks.length) continue;
+      const w = cleanWorkout(raw);
+      if (workouts.some((x) => x.id === w.id)) w.id = newId();
+      workouts.push(w);
+      added++;
+    }
+    if (!added) throw new Error('none of the workouts in the file have any blocks');
+    state.alert = null;
+    saveWorkouts();
+    log('Imported ' + added + ' workout' + (added === 1 ? '' : 's') + ' from ' + file.name);
+  } catch (err) {
+    state.alert = 'Import failed: ' + err.message + '.';
+    log(state.alert, 'err');
+  }
+  renderWorkouts();
+  render();
 }
 
 function restorePresets() {
@@ -1405,8 +1459,66 @@ function saveRides() {
   }
 }
 
+// ---- recovery after an accidental reload
+
+const PROGRESS_KEY = 'erg.inprogress.v1';
+let lastProgressSave = 0;
+let progressWarned = false;
+
+function saveProgress() {
+  if (!rec) return;
+  lastProgressSave = performance.now();
+  const inWorkout = run && run.status !== 'ready';
+  try {
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify({
+      savedAt: Date.now(), rec, capWatts: cap.watts,
+      base: state.noCap ? null : state.base,
+      run: inWorkout ? { workout: run.workout, elapsedMs: run.elapsedMs, offset: run.offset } : null,
+    }));
+  } catch (err) {
+    if (!progressWarned) log('The ride in progress could not be backed up: ' + err.message, 'err');
+    progressWarned = true;
+  }
+}
+
+function clearProgress() {
+  try { localStorage.removeItem(PROGRESS_KEY); } catch (err) { /* nothing to clear */ }
+}
+
+function offerRecovery() {
+  const saved = loadJson(PROGRESS_KEY, null);
+  if (!saved || !saved.rec || !Array.isArray(saved.rec.samples) || saved.rec.samples.length < 10) { clearProgress(); return; }
+  const box = $('recover');
+  const close = () => { box.hidden = true; box.replaceChildren(); };
+  const adopt = () => { rec = saved.rec; recCarry = 0; freeZeroSince = null; cap.watts = Math.min(0, Number(saved.capWatts) || 0); };
+  box.replaceChildren(
+    el('span', { text: 'A ride was interrupted at ' + fmtDate(saved.savedAt) + ': ' + saved.rec.name + ', ' + fmtShort(saved.rec.samples.length * 1000) + ' recorded.' }),
+    el('span', { class: 'spacer' }),
+    el('button', {
+      class: 'primary', text: 'Resume ride',
+      onclick: () => {
+        adopt();
+        if (saved.run) {
+          run = { workout: cleanWorkout(saved.run.workout), status: 'paused', elapsedMs: Number(saved.run.elapsedMs) || 0,
+            offset: Number(saved.run.offset) || 0, blockIndex: -1, lastSendAt: 0, zeroSince: null };
+        } else if (saved.base != null) {
+          applyTarget(Number(saved.base));
+        }
+        log('Ride recovered' + (saved.run ? '. The workout is paused; reconnect the trainer and press Resume.' : '. Reconnect the trainer to carry on.'));
+        keepAwake();
+        close();
+        showView('ride');
+        render();
+      },
+    }),
+    el('button', { text: 'Save as finished', onclick: () => { adopt(); close(); finishRide(); } }),
+    el('button', { text: 'Discard', onclick: () => { if (confirm('Discard the interrupted ride? This cannot be undone.')) { clearProgress(); close(); } } }));
+  box.hidden = false;
+}
+
 function finishRide() {
   const ride = rec;
+  clearProgress();
   rec = null;
   run = null;
   resetCap();
@@ -1509,6 +1621,32 @@ function capTick() {
   }
 }
 
+// -------------------------------------------------------- ERG spiral guard
+
+// In ERG a falling cadence makes the trainer push back harder, which slows the
+// rider further. If cadence stays low, ease the target briefly so they can spin up.
+const SPIRAL = { rpm: 50, afterMs: 10000, holdMs: 15000, factor: 0.8 };
+const spiral = { lowSince: null, until: null };
+
+function spiralTick(now) {
+  if (spiral.until != null) {
+    if (now < spiral.until) return;
+    spiral.until = null;
+    spiral.lowSince = null;
+    log('Low cadence guard: target restored.');
+    pushTarget();
+    return;
+  }
+  const cadFresh = now - state.cadenceAt < STALE_MS;
+  const erg = trainer && trainer.canControl && state.base != null && !state.noCap;
+  if (!erg || !cadFresh || !(state.cadence > 0 && state.cadence < SPIRAL.rpm)) { spiral.lowSince = null; return; }
+  if (spiral.lowSince == null) spiral.lowSince = now;
+  if (now - spiral.lowSince < SPIRAL.afterMs) return;
+  spiral.until = now + SPIRAL.holdMs;
+  log('Low cadence guard: under ' + SPIRAL.rpm + ' rpm for 10 seconds. Target eased by 20 % for 15 seconds.');
+  pushTarget();
+}
+
 // ------------------------------------------------------------------ lactate
 
 // A reading is { id, rideId, rideName, t, elapsed, block, power, hr, mmol }.
@@ -1606,8 +1744,90 @@ function lactateTable(rows, withRide) {
 
 function renderLactate() {
   const rows = lactate.slice().sort((a, b) => b.t - a.t);
-  $('lactate-body').replaceChildren(lactateTable(rows, true));
+  $('lactate-body').replaceChildren(...lactateCharts(rows), lactateTable(rows, true));
   $('btn-lac-csv').disabled = !rows.length;
+}
+
+function niceStep(span, count) {
+  const raw = span / count;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const n = raw / mag;
+  return (n < 1.5 ? 1 : n < 3.5 ? 2 : n < 7.5 ? 5 : 10) * mag;
+}
+
+function dayKey(t) {
+  const d = new Date(t);
+  return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+}
+
+// Older days are grey-blue, the newest is amber, so a shifting curve reads left to right in time.
+function dayColor(rank, count) {
+  const t = count > 1 ? rank / (count - 1) : 1;
+  const from = [91, 107, 125], to = [255, 176, 32];
+  return 'rgb(' + from.map((v, i) => Math.round(v + (to[i] - v) * t)).join(',') + ')';
+}
+
+// Lactate against one measure. Every value placed in the markup is a number or a formatted date.
+function lactateScatter(rows, key, unit, title, days, refX) {
+  const pts = rows.filter((r) => r[key] != null);
+  const W = 420, H = 260, L = 40, R = 14, T = 26, B = 34;
+  const xs = pts.map((r) => r[key]);
+  const xStep = niceStep(Math.max(Math.max(...xs) - Math.min(...xs), 20), 5);
+  const x0 = Math.floor((Math.min(...xs) - xStep / 2) / xStep) * xStep;
+  const x1 = Math.ceil((Math.max(...xs) + xStep / 2) / xStep) * xStep;
+  const y1 = Math.max(4, Math.ceil(Math.max(...pts.map((r) => r.mmol)) + 0.5));
+  const yStep = niceStep(y1, 5);
+  const px = (v) => (L + (v - x0) / (x1 - x0) * (W - L - R)).toFixed(1);
+  const py = (v) => (H - B - v / y1 * (H - T - B)).toFixed(1);
+
+  let out = '<text class="ttl" x="' + L + '" y="16">Lactate (mmol/L) against ' + title + '</text>';
+  for (let v = 0; v <= y1 + 1e-9; v += yStep) {
+    out += '<line class="grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + py(v) + '" y2="' + py(v) + '"/>';
+    out += '<text x="' + (L - 6) + '" y="' + (Number(py(v)) + 4) + '" text-anchor="end">' + Number(v.toFixed(1)) + '</text>';
+  }
+  for (let v = x0; v <= x1 + 1e-9; v += xStep) {
+    out += '<text x="' + px(v) + '" y="' + (H - B + 16) + '" text-anchor="middle">' + Math.round(v) + '</text>';
+  }
+  out += '<text x="' + (W - R) + '" y="' + (H - 4) + '" text-anchor="end">' + unit + '</text>';
+  out += '<line class="ref" x1="' + L + '" x2="' + (W - R) + '" y1="' + py(1.5) + '" y2="' + py(1.5) + '"/>';
+  out += '<text x="' + (W - R) + '" y="' + (Number(py(1.5)) - 4) + '" text-anchor="end">1.5</text>';
+  if (refX != null && refX > x0 && refX < x1) {
+    out += '<line class="ref" x1="' + px(refX) + '" x2="' + px(refX) + '" y1="' + T + '" y2="' + (H - B) + '"/>';
+    out += '<text x="' + (Number(px(refX)) + 4) + '" y="' + (T + 10) + '">ceiling ' + Math.round(refX) + '</text>';
+  }
+  days.forEach((day, rank) => {
+    const mine = pts.filter((r) => dayKey(r.t) === day).sort((a, b) => a[key] - b[key]);
+    const color = dayColor(rank, days.length);
+    if (mine.length > 1) out += '<polyline stroke="' + color + '" points="' + mine.map((r) => px(r[key]) + ',' + py(r.mmol)).join(' ') + '"/>';
+    for (const r of mine) {
+      out += '<circle cx="' + px(r[key]) + '" cy="' + py(r.mmol) + '" r="5" fill="' + color + '"><title>' +
+        Number(r.mmol) + ' mmol/L at ' + Math.round(r[key]) + ' ' + unit + ', ' + new Date(r.t).toLocaleDateString([], { dateStyle: 'medium' }) + '</title></circle>';
+    }
+  });
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'scatter');
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', 'Lactate against ' + title + ', ' + pts.length + ' readings. The table below has the same data.');
+  svg.innerHTML = out;
+  return svg;
+}
+
+function lactateCharts(rows) {
+  const usable = rows.filter((r) => Number.isFinite(Number(r.mmol)) && (r.power != null || r.hr != null));
+  if (!usable.length) return [];
+  const days = Array.from(new Set(usable.map((r) => dayKey(r.t)))).sort((a, b) => a - b);
+  const label = (day) => new Date(Math.floor(day / 10000), Math.floor(day / 100) % 100 - 1, day % 100).toLocaleDateString([], { dateStyle: 'medium' });
+  const shown = days.length <= 8 ? days : [days[0], days[days.length - 1]];
+  const charts = el('div', { class: 'charts' });
+  if (usable.some((r) => r.power != null)) charts.append(lactateScatter(usable, 'power', 'W', 'power', days));
+  if (usable.some((r) => r.hr != null)) charts.append(lactateScatter(usable, 'hr', 'bpm', 'heart rate', days, settings.capOn ? settings.ceiling : null));
+  const keys = el('div', { class: 'keys' },
+    ...shown.map((day) => el('span', null, el('i', { style: 'background:' + dayColor(days.indexOf(day), days.length) }), label(day))),
+    days.length > 8 ? el('span', { text: days.length + ' days in all, shaded from oldest to newest.' }) : null,
+    el('span', { text: 'Power and heart rate are the 60 second averages before each reading. The dashed line marks 1.5 mmol/L.' }));
+  return [charts, keys];
 }
 
 function exportLactateCsv() {
@@ -2070,7 +2290,9 @@ function render() {
 
   const cut = !state.noCap && cap.watts < 0;
   if (cut) $('s-target').textContent = 'Heart rate cap: ' + cap.watts + ' W from ' + state.base + ' W. ' + sub;
-  $('tile-target').classList.toggle('capped', cut);
+  const easing = spiral.until != null && !state.noCap;
+  if (easing) $('s-target').textContent = 'Low cadence: target eased by 20 % for 15 seconds. ' + sub;
+  $('tile-target').classList.toggle('capped', cut || easing);
   $('l-power').textContent = 'Power (' + settings.smoothSecs + ' s)';
   $('tile-hr').classList.toggle('over', settings.capOn && hr != null && hr > settings.ceiling);
   $('s-hr').textContent = !settings.capOn ? 'Cap off'
@@ -2110,6 +2332,8 @@ setInterval(() => {
   lastTick = now;
   runTick(now, dt);
   recTick(now, dt);
+  spiralTick(now);
+  if (rec && now - lastProgressSave >= 10000) saveProgress();
   render();
 }, 250);
 
@@ -2155,6 +2379,21 @@ $('btn-new').addEventListener('click', () => {
   renderWorkouts();
 });
 $('btn-presets').addEventListener('click', restorePresets);
+$('btn-export-all').addEventListener('click', () => exportWorkouts(workouts, 'erg-workouts.json'));
+$('btn-import').addEventListener('click', () => $('file-import').click());
+$('file-import').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (file) importWorkouts(file);
+});
+$('alert').addEventListener('click', () => { state.alert = null; render(); });
+window.addEventListener('pagehide', saveProgress);
+window.addEventListener('beforeunload', (e) => {
+  if (!rec) return;
+  saveProgress();
+  e.preventDefault();
+  e.returnValue = '';
+});
 $('btn-add-steady').addEventListener('click', () => addBlock('steady'));
 $('btn-add-ramp').addEventListener('click', () => addBlock('ramp'));
 $('btn-ed-cancel').addEventListener('click', () => { draft = null; renderWorkouts(); });
@@ -2179,6 +2418,7 @@ if (!('bluetooth' in navigator)) {
 
 renderConn();
 render();
+offerRecovery();
 finishStravaConnect();
 if (new URLSearchParams(location.search).has('sim')) toggleSim();
 </script>
