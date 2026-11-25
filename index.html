@@ -186,6 +186,40 @@
   .ed-foot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 14px; }
   #ed-total { color: var(--muted); }
 
+  #tile-hr.over .value { color: var(--bad); }
+  #tile-target.capped .sub { color: var(--warn); }
+  .page { flex: 1; padding: 16px; max-width: 920px; width: 100%; margin: 0 auto; }
+  .page input, .page select, dialog input {
+    background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+  }
+  .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
+  .stat .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .stat .v { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .chart { display: block; width: 100%; height: 160px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+  .chart polyline { fill: none; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  .chart .p { stroke: var(--accent); }
+  .chart .h { stroke: var(--bad); }
+  .legend { color: var(--muted); font-size: 13px; margin: 6px 0 14px; }
+  .legend .kp { color: var(--accent); } .legend .kh { color: var(--bad); }
+  .tscroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500; }
+  td input { width: 80px; }
+  td button { padding: 6px 10px; }
+  .page h3 { margin: 20px 0 8px; font-size: 16px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+  .set { display: grid; grid-template-columns: 1fr 120px; gap: 10px 16px; align-items: center; max-width: 560px; }
+  .set input[type="checkbox"] { width: 22px; height: 22px; justify-self: start; }
+  .set input, .set select { width: 100%; }
+  .note { color: var(--muted); font-size: 14px; margin: 8px 0; }
+  dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 20px; min-width: 300px; }
+  dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+  dialog h3 { margin: 0 0 8px; }
+  dialog label { display: block; margin: 12px 0 6px; color: var(--muted); font-size: 14px; }
+  #lac-value { width: 100%; font-size: 32px; font-variant-numeric: tabular-nums; }
+
   @media (max-width: 640px) {
     main { grid-template-columns: 1fr; }
   }
@@ -197,6 +231,9 @@
   <nav>
     <button id="nav-ride" aria-pressed="true">Ride</button>
     <button id="nav-workouts" aria-pressed="false">Workouts</button>
+    <button id="nav-rides" aria-pressed="false">Rides</button>
+    <button id="nav-lactate" aria-pressed="false">Lactate</button>
+    <button id="nav-settings" aria-pressed="false">Settings</button>
   </nav>
   <div class="device">
     <button id="btn-trainer">Connect trainer</button>
@@ -211,7 +248,8 @@
   <span class="spacer"></span>
   <span class="pill">Ride time</span>
   <span id="clock">0:00:00</span>
-  <button id="btn-reset" title="Reset ride time">Reset</button>
+  <button id="btn-ride">Start ride</button>
+  <button id="btn-lactate" disabled>Log lactate</button>
 </header>
 
 <div id="view-ride">
@@ -239,14 +277,14 @@
     <div class="sub" id="s-target">No target set</div>
   </section>
   <section class="tile stale" id="tile-power">
-    <div class="label">Power (3 s)</div>
+    <div class="label" id="l-power">Power (3 s)</div>
     <div class="value"><span id="v-power">--</span><small>W</small></div>
     <div class="sub" id="s-power"></div>
   </section>
   <section class="tile stale" id="tile-hr">
     <div class="label">Heart rate</div>
     <div class="value"><span id="v-hr">--</span><small>bpm</small></div>
-    <div class="sub"></div>
+    <div class="sub" id="s-hr"></div>
   </section>
   <section class="tile stale" id="tile-cad">
     <div class="label">Cadence</div>
@@ -262,7 +300,7 @@
   <button class="step" id="btn-plus" aria-label="Raise target by 5 watts">+5</button>
   <button class="primary" id="btn-set">Set target</button>
   <button id="btn-easy">Easy (80 W)</button>
-  <span class="hint">Free ride. Up / Down arrows: 5 W. Range 50 to 400 W.</span>
+  <span class="hint">Free ride. Up / Down arrows: 5 W. L: log lactate.</span>
 </footer>
 
 <footer id="foot-run" hidden>
@@ -276,7 +314,7 @@
   <span id="offset">0 W</span>
   <button class="step" id="btn-off-plus" aria-label="Raise all remaining targets by 5 watts">+5</button>
   <button id="btn-off-reset">Reset offset</button>
-  <span class="hint">Space: start or pause. Up / Down: 5 W. 0: reset offset.</span>
+  <span class="hint">Space: start or pause. Up / Down: 5 W. 0: reset offset. L: log lactate.</span>
 </footer>
 </div>
 
@@ -305,6 +343,39 @@
   </div>
 </section>
 
+<section class="page" id="view-rides" hidden>
+  <div class="pane-head"><h2>Rides</h2></div>
+  <div id="rides-body"></div>
+</section>
+
+<section class="page" id="view-summary" hidden>
+  <div id="summary-body"></div>
+</section>
+
+<section class="page" id="view-lactate" hidden>
+  <div class="pane-head"><h2>Lactate log</h2><button id="btn-lac-csv">Export CSV</button></div>
+  <div id="lactate-body"></div>
+</section>
+
+<section class="page" id="view-settings" hidden>
+  <div class="pane-head"><h2>Settings</h2><button id="btn-defaults">Reset to defaults</button></div>
+  <div id="settings-body"></div>
+</section>
+
+<dialog id="dlg-lactate">
+  <form id="form-lactate">
+    <h3>Log lactate</h3>
+    <div class="note" id="lac-context"></div>
+    <label for="lac-value">Reading (mmol/L)</label>
+    <input id="lac-value" type="number" inputmode="decimal" min="0.1" max="30" step="0.1" required>
+    <div class="row">
+      <span class="spacer"></span>
+      <button type="button" id="btn-lac-cancel">Cancel</button>
+      <button class="primary" type="submit">Save reading</button>
+    </div>
+  </form>
+</dialog>
+
 <details>
   <summary>Event log</summary>
   <div id="log"></div>
@@ -315,11 +386,8 @@
 
 // ---------------------------------------------------------------- constants
 
-const MIN_W = 50;
-const MAX_W = 400;
 const EASY_W = 80;
 const STEP_W = 5;
-const SMOOTH_MS = 3000;
 const STALE_MS = 4000;
 const AUTO_PAUSE_MS = 5000;
 const STORE_KEY = 'erg.workouts.v1';
@@ -339,14 +407,16 @@ const CP_RESULT = {
 // -------------------------------------------------------------------- state
 
 const state = {
-  target: null,        // watts the rider asked for
+  base: null,          // watts asked for by the rider or the workout, before the heart rate cap
+  noCap: false,        // true while the base is an easy or paused target the cap must not touch
+  target: null,        // watts sent to the trainer
   accepted: null,      // last target the trainer confirmed
   pending: false,      // a target has been sent and not yet confirmed
   alert: null,
   samples: [],         // {t, w} power samples
   cadence: null, cadenceAt: 0,
   hr: null, hrAt: 0,
-  rideMs: 0,
+  hrLog: [],           // {t, bpm} for the rolling average
   conn: { trainer: { st: 'off' }, hr: { st: 'off' } },
 };
 
@@ -368,6 +438,34 @@ function log(msg, level) {
   while (box.children.length > 100) box.lastChild.remove();
 }
 
+function loadJson(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw != null) return JSON.parse(raw);
+  } catch (err) {
+    log('Stored data for ' + key + ' could not be read: ' + err.message, 'err');
+  }
+  return fallback;
+}
+
+function saveJson(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch (err) {
+    state.alert = 'Could not save to browser storage: ' + err.message;
+    log(state.alert, 'err');
+    return false;
+  }
+}
+
+const SETTINGS_KEY = 'erg.settings.v1';
+const DEFAULTS = {
+  capOn: true, ceiling: 138, capWindow: 30, capDelay: 60, capStep: 5, capMargin: 5, capHold: 180, capGrace: 300,
+  minW: 50, maxW: 400, smoothSecs: 3,
+};
+const settings = Object.assign({}, DEFAULTS, loadJson(SETTINGS_KEY, {}));
+
 // The hub is the only way devices talk to the rest of the app.
 const hub = {
   conn(kind, st, name) {
@@ -380,7 +478,13 @@ const hub = {
     while (state.samples.length && state.samples[0].t < t - 10000) state.samples.shift();
   },
   cadence(rpm) { state.cadence = rpm; state.cadenceAt = performance.now(); },
-  hr(bpm) { state.hr = bpm; state.hrAt = performance.now(); },
+  hr(bpm) {
+    const t = performance.now();
+    state.hr = bpm;
+    state.hrAt = t;
+    state.hrLog.push({ t, bpm });
+    while (state.hrLog.length && state.hrLog[0].t < t - 130000) state.hrLog.shift();
+  },
   accepted(w) {
     state.accepted = w;
     state.pending = false;
@@ -701,11 +805,21 @@ class SimTrainer {
 
 // ----------------------------------------------------------------- actions
 
-function applyTarget(w) {
+// The base target comes from the rider or the workout. The heart rate cap is
+// subtracted on top, unless noCap marks this as an easy or paused target.
+function applyTarget(w, noCap) {
   if (!Number.isFinite(w)) return;
-  w = Math.round(clamp(w, MIN_W, MAX_W));
+  state.base = Math.round(clamp(w, settings.minW, settings.maxW));
+  state.noCap = !!noCap;
+  pushTarget();
+}
+
+function pushTarget() {
+  if (state.base == null) return;
+  const cut = state.noCap ? 0 : cap.watts;
+  const w = Math.round(clamp(state.base + cut, settings.minW, settings.maxW));
   state.target = w;
-  $('target-input').value = w;
+  $('target-input').value = state.base;
   if (trainer && trainer.canControl) {
     state.pending = true;
     trainer.setTarget(w);
@@ -714,7 +828,7 @@ function applyTarget(w) {
 }
 
 function nudge(delta) {
-  const base = state.target != null ? state.target : Number($('target-input').value) || 100;
+  const base = state.base != null ? state.base : Number($('target-input').value) || 100;
   applyTarget(base + delta);
 }
 
@@ -804,7 +918,7 @@ function presets() {
 
 function cleanWatts(v) {
   v = Number(v);
-  return Number.isFinite(v) ? Math.round(clamp(v, MIN_W, MAX_W)) : 100;
+  return Number.isFinite(v) ? Math.round(clamp(v, settings.minW, settings.maxW)) : 100;
 }
 
 function cleanBlock(b) {
@@ -1007,8 +1121,8 @@ function renderEditor() {
       },
         el('option', { value: 'steady', text: 'Steady', selected: !isRamp }),
         el('option', { value: 'ramp', text: 'Ramp', selected: isRamp })),
-      field(startWatts(b), isRamp ? 'start watts' : 'watts', (v) => { if (isRamp) b.from = v; else b.watts = v; }, MAX_W),
-      isRamp ? field(b.to, 'end watts', (v) => { b.to = v; }, MAX_W) : el('div'),
+      field(startWatts(b), isRamp ? 'start watts' : 'watts', (v) => { if (isRamp) b.from = v; else b.watts = v; }, settings.maxW),
+      isRamp ? field(b.to, 'end watts', (v) => { b.to = v; }, settings.maxW) : el('div'),
       mins,
       secs,
       el('div', { class: 'ops' },
@@ -1049,12 +1163,19 @@ function saveDraft() {
   renderWorkouts();
 }
 
+const VIEWS = ['ride', 'workouts', 'rides', 'summary', 'lactate', 'settings'];
+
 function showView(name) {
-  $('view-ride').hidden = name !== 'ride';
-  $('view-workouts').hidden = name !== 'workouts';
-  $('nav-ride').setAttribute('aria-pressed', String(name === 'ride'));
-  $('nav-workouts').setAttribute('aria-pressed', String(name === 'workouts'));
+  for (const v of VIEWS) {
+    $('view-' + v).hidden = v !== name;
+    const tab = $('nav-' + v);
+    if (tab) tab.setAttribute('aria-pressed', String(v === name || (v === 'rides' && name === 'summary')));
+  }
   if (name === 'workouts') renderWorkouts();
+  if (name === 'rides') renderRides();
+  if (name === 'summary') renderSummary();
+  if (name === 'lactate') renderLactate();
+  if (name === 'settings') renderSettings();
 }
 
 // --------------------------------------------------------------- run engine
@@ -1079,9 +1200,9 @@ function sendRunTarget(force) {
     log('Block ' + (pos.i + 1) + ': ' + describeBlock(run.workout, pos.i));
   }
   const now = performance.now();
-  const w = Math.round(clamp(plannedWatts(pos.b, pos.into) + run.offset, MIN_W, MAX_W));
+  const w = Math.round(clamp(plannedWatts(pos.b, pos.into) + run.offset, settings.minW, settings.maxW));
   // Ramps step in whole watts, sent at most once per second.
-  if (force || (w !== state.target && now - run.lastSendAt >= 1000)) {
+  if (force || (w !== state.base && now - run.lastSendAt >= 1000)) {
     run.lastSendAt = now;
     applyTarget(w);
   }
@@ -1098,12 +1219,13 @@ function setRunning(why) {
 function holdRun(status, why) {
   run.status = status;
   log(why);
-  applyTarget(EASY_W);
+  if (status === 'done') finishRide();
+  else applyTarget(EASY_W, true);
 }
 
 function goAction() {
   if (!run) return;
-  if (run.status === 'ready') setRunning('Workout started');
+  if (run.status === 'ready') { startRide(run.workout.name); setRunning('Workout started'); }
   else if (run.status === 'running') holdRun('paused', 'Workout paused');
   else if (run.status === 'paused' || run.status === 'autopaused') setRunning('Workout resumed');
   else if (run.status === 'done') { run.elapsedMs = 0; run.blockIndex = -1; setRunning('Workout restarted'); }
@@ -1120,7 +1242,8 @@ function skipBlock() {
 }
 
 function endRun() {
-  if (run && run.status !== 'done' && run.status !== 'ready') holdRun('done', 'Workout ended early');
+  if (!run || run.status === 'done' || run.status === 'ready') return;
+  if (confirm('End the workout and save the ride?')) holdRun('done', 'Workout ended early');
 }
 
 function closeRun() {
@@ -1196,11 +1319,512 @@ function renderRun() {
   $('btn-off-reset').disabled = run.offset === 0;
 }
 
+// ---------------------------------------------------------------- recording
+
+// A ride is { id, name, startedAt, samples, stats }. Each sample is one second
+// of riding: [epoch ms, power, heart rate, cadence, target]. Missing values are null.
+
+const RIDES_KEY = 'erg.rides.v1';
+const LACTATE_KEY = 'erg.lactate.v1';
+const KEEP_SAMPLES = 15;           // older rides keep their summary but drop the samples
+
+let rides = loadJson(RIDES_KEY, []);
+if (!Array.isArray(rides)) rides = [];
+let lactate = loadJson(LACTATE_KEY, []);
+if (!Array.isArray(lactate)) lactate = [];
+
+let rec = null;                    // ride being recorded
+let recCarry = 0;
+let freeZeroSince = null;
+let shownRideId = null;
+let pendingLactate = null;
+
+function startRide(name) {
+  if (rec) { rec.name = name; return; }
+  rec = { id: newId(), name, startedAt: Date.now(), samples: [] };
+  recCarry = 0;
+  freeZeroSince = null;
+  resetCap();
+  keepAwake();
+  log('Recording started: ' + name);
+}
+
+// Recording follows the workout clock. In a free ride it stops after 5 seconds of no pedalling.
+function rideActive(now) {
+  if (run && run.status !== 'ready') return run.status === 'running';
+  const last = state.samples[state.samples.length - 1];
+  const fresh = !!last && now - last.t < STALE_MS;
+  const moving = (fresh && last.w > 0) || (now - state.cadenceAt < STALE_MS && state.cadence > 0);
+  if (!fresh || moving) { freeZeroSince = null; return true; }
+  if (freeZeroSince == null) freeZeroSince = now;
+  return now - freeZeroSince <= AUTO_PAUSE_MS;
+}
+
+function recTick(now, dt) {
+  if (!rec) return;
+  if (!rideActive(now)) { recCarry = 0; return; }
+  recCarry += dt;
+  const last = state.samples[state.samples.length - 1];
+  const fresh = (at) => now - at < STALE_MS;
+  // More than one loop only happens when the browser held the timer back.
+  for (let guard = 0; recCarry >= 1000 && guard < 120; guard++) {
+    recCarry -= 1000;
+    rec.samples.push([
+      Date.now() - Math.round(recCarry),
+      last && fresh(last.t) ? Math.round(last.w) : null,
+      state.hr != null && fresh(state.hrAt) ? Math.round(state.hr) : null,
+      state.cadence != null && fresh(state.cadenceAt) ? Math.round(state.cadence) : null,
+      state.target,
+    ]);
+    capTick();
+  }
+  if (recCarry >= 1000) recCarry = 0;
+}
+
+function saveRides() {
+  rides.slice(KEEP_SAMPLES).forEach((r) => { r.samples = []; });
+  // If storage is full, drop samples from the oldest rides until it fits.
+  for (;;) {
+    try {
+      localStorage.setItem(RIDES_KEY, JSON.stringify(rides));
+      return true;
+    } catch (err) {
+      const oldest = rides.slice(1).reverse().find((r) => r.samples.length);
+      if (!oldest) {
+        state.alert = 'The ride could not be saved in this browser. Download the TCX file now.';
+        log(state.alert + ' ' + err.message, 'err');
+        return false;
+      }
+      oldest.samples = [];
+    }
+  }
+}
+
+function finishRide() {
+  const ride = rec;
+  rec = null;
+  run = null;
+  resetCap();
+  applyTarget(EASY_W, true);
+  if (!ride) return;
+  if (ride.samples.length < 10) {
+    log('The ride was under 10 seconds and was not saved.');
+    render();
+    return;
+  }
+  ride.startedAt = ride.samples[0][0];
+  ride.stats = rideStats(ride);
+  rides.unshift(ride);
+  saveRides();
+  log('Ride saved: ' + ride.name + ', ' + fmtShort(ride.stats.secs * 1000));
+  shownRideId = ride.id;
+  showView('summary');
+}
+
+const mean = (list) => (list.length ? list.reduce((a, b) => a + b, 0) / list.length : null);
+
+function rideStats(ride) {
+  const S = ride.samples;
+  const filled = S.map((s) => s[1] || 0);
+  const power = S.filter((s) => s[1] != null).map((s) => s[1]);
+  const hr = S.filter((s) => s[2] != null).map((s) => s[2]);
+  const cad = S.filter((s) => s[3] > 0).map((s) => s[3]);
+
+  // Normalized power: 30 second rolling average, fourth power mean.
+  let np = null;
+  if (filled.length >= 30) {
+    let window = 0, total = 0, count = 0;
+    for (let i = 0; i < filled.length; i++) {
+      window += filled[i];
+      if (i >= 30) window -= filled[i - 30];
+      if (i >= 29) { total += Math.pow(window / 30, 4); count++; }
+    }
+    np = Math.pow(total / count, 0.25);
+  }
+
+  // Heart rate drift: beats per watt in the second half against the first half.
+  let drift = null;
+  const both = S.filter((s) => s[1] > 0 && s[2] > 0);
+  if (both.length >= 120) {
+    const half = Math.floor(both.length / 2);
+    const ratio = (part) => mean(part.map((s) => s[2])) / mean(part.map((s) => s[1]));
+    drift = (ratio(both.slice(half)) / ratio(both.slice(0, half)) - 1) * 100;
+  }
+
+  return {
+    secs: S.length,
+    elapsedSecs: S.length ? Math.round((S[S.length - 1][0] - S[0][0]) / 1000) + 1 : 0,
+    avgP: mean(power), np, avgHr: mean(hr), maxHr: hr.length ? Math.max(...hr) : null,
+    avgCad: mean(cad), kj: filled.reduce((a, b) => a + b, 0) / 1000, drift,
+  };
+}
+
+// ----------------------------------------------------------- heart rate cap
+
+const cap = { watts: 0, above: 0, below: 0, avg: null };
+
+function resetCap() {
+  cap.watts = 0;
+  cap.above = 0;
+  cap.below = 0;
+  cap.avg = null;
+}
+
+function hrAverage(secs) {
+  const from = performance.now() - secs * 1000;
+  const recent = state.hrLog.filter((h) => h.t >= from).map((h) => h.bpm);
+  return mean(recent);
+}
+
+// Runs once for every recorded second, so paused time never counts.
+function capTick() {
+  cap.avg = hrAverage(settings.capWindow);
+  if (!settings.capOn || cap.avg == null || state.noCap || state.base == null) { cap.above = 0; cap.below = 0; return; }
+  if (rec.samples.length < settings.capGrace) return;
+
+  if (cap.avg > settings.ceiling) {
+    cap.below = 0;
+    if (++cap.above < settings.capDelay) return;
+    cap.above = 0;
+    if (state.base + cap.watts <= settings.minW) return;
+    cap.watts -= settings.capStep;
+    log('Heart rate cap: average ' + Math.round(cap.avg) + ' bpm is over ' + settings.ceiling + '. Power cut is now ' + -cap.watts + ' W.');
+    pushTarget();
+  } else if (cap.avg <= settings.ceiling - settings.capMargin) {
+    cap.above = 0;
+    if (cap.watts >= 0) return;
+    if (++cap.below < settings.capHold) return;
+    cap.below = 0;
+    cap.watts = Math.min(0, cap.watts + settings.capStep);
+    log('Heart rate cap: average ' + Math.round(cap.avg) + ' bpm has recovered. Power cut is now ' + -cap.watts + ' W.');
+    pushTarget();
+  } else {
+    cap.above = 0;
+    cap.below = 0;
+  }
+}
+
+// ------------------------------------------------------------------ lactate
+
+// A reading is { id, rideId, rideName, t, elapsed, block, power, hr, mmol }.
+
+function avgOver(samples, end, secs, col) {
+  return mean(samples.slice(Math.max(0, end - secs), end).map((s) => s[col]).filter((v) => v != null));
+}
+
+function openLactateDialog() {
+  if (!rec || $('dlg-lactate').open) return;
+  const n = rec.samples.length;
+  const inWorkout = run && run.status !== 'ready';
+  const pos = inWorkout ? blockAt(run.workout, run.elapsedMs) : null;
+  pendingLactate = {
+    rideId: rec.id, rideName: rec.name, t: Date.now(), elapsed: n,
+    block: pos ? describeBlock(run.workout, pos.i) : 'Free ride',
+    power: avgOver(rec.samples, n, 60, 1), hr: avgOver(rec.samples, n, 60, 2),
+  };
+  $('lac-context').textContent = 'At ' + fmtShort(n * 1000) + ', ' + pendingLactate.block + '. 60 s average: ' +
+    fmtNum(pendingLactate.power, ' W') + ', ' + fmtNum(pendingLactate.hr, ' bpm') + '.';
+  $('lac-value').value = '';
+  $('dlg-lactate').showModal();
+}
+
+function saveLactateDialog(e) {
+  e.preventDefault();
+  const mmol = Number($('lac-value').value);
+  if (!pendingLactate || !(mmol > 0 && mmol <= 30)) return;
+  lactate.push(Object.assign({ id: newId(), mmol }, pendingLactate));
+  pendingLactate = null;
+  saveJson(LACTATE_KEY, lactate);
+  log('Lactate logged: ' + mmol + ' mmol/L');
+  $('dlg-lactate').close();
+}
+
+function lactateChanged() {
+  saveJson(LACTATE_KEY, lactate);
+  if (!$('view-summary').hidden) renderSummary();
+  if (!$('view-lactate').hidden) renderLactate();
+}
+
+function parseClock(text) {
+  const parts = String(text).trim().split(':').map(Number);
+  if (!parts.length || parts.length > 3 || parts.some((p) => !Number.isFinite(p) || p < 0)) return null;
+  if (parts.length === 1) return Math.round(parts[0] * 60);
+  return parts.reduce((total, p) => total * 60 + p, 0);
+}
+
+function addLactateAfterRide(ride, clockText, mmolText) {
+  const elapsed = parseClock(clockText);
+  const mmol = Number(mmolText);
+  if (elapsed == null || !(mmol > 0 && mmol <= 30)) {
+    state.alert = 'Enter the time as minutes:seconds and a reading between 0.1 and 30 mmol/L.';
+    render();
+    return;
+  }
+  const end = clamp(elapsed, 1, Math.max(1, ride.samples.length));
+  const at = ride.samples[end - 1];
+  lactate.push({
+    id: newId(), rideId: ride.id, rideName: ride.name, t: at ? at[0] : ride.startedAt + elapsed * 1000,
+    elapsed, block: '', power: avgOver(ride.samples, end, 60, 1), hr: avgOver(ride.samples, end, 60, 2), mmol,
+  });
+  state.alert = null;
+  lactateChanged();
+}
+
+function lactateTable(rows, withRide) {
+  if (!rows.length) return el('div', { class: 'note', text: 'No lactate readings.' });
+  const head = ['When'].concat(withRide ? ['Ride'] : [], ['Elapsed', 'Block', 'Power 60 s', 'HR 60 s', 'mmol/L', '']);
+  const body = rows.map((r) => el('tr', null,
+    el('td', { text: fmtDate(r.t) }),
+    withRide ? el('td', { text: r.rideName || '' }) : null,
+    el('td', { text: fmtShort(r.elapsed * 1000) }),
+    el('td', { text: r.block || '' }),
+    el('td', { text: fmtNum(r.power, ' W') }),
+    el('td', { text: fmtNum(r.hr, ' bpm') }),
+    el('td', null, el('input', {
+      type: 'number', min: 0.1, max: 30, step: 0.1, value: r.mmol, 'aria-label': 'Lactate reading in mmol per litre',
+      onchange: (e) => {
+        const v = Number(e.target.value);
+        if (v > 0 && v <= 30) { r.mmol = v; saveJson(LACTATE_KEY, lactate); } else e.target.value = r.mmol;
+      },
+    })),
+    el('td', null, el('button', {
+      text: 'Delete',
+      onclick: () => {
+        if (!confirm('Delete this lactate reading?')) return;
+        lactate = lactate.filter((x) => x !== r);
+        lactateChanged();
+      },
+    }))));
+  return el('div', { class: 'tscroll' },
+    el('table', null, el('thead', null, el('tr', null, ...head.map((h) => el('th', { text: h })))), el('tbody', null, ...body)));
+}
+
+function renderLactate() {
+  const rows = lactate.slice().sort((a, b) => b.t - a.t);
+  $('lactate-body').replaceChildren(lactateTable(rows, true));
+  $('btn-lac-csv').disabled = !rows.length;
+}
+
+function exportLactateCsv() {
+  const cell = (v) => (v == null ? '' : /[",\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v));
+  const lines = [['timestamp', 'ride', 'elapsed_s', 'block', 'power_60s_w', 'hr_60s_bpm', 'lactate_mmol_l']];
+  for (const r of lactate.slice().sort((a, b) => a.t - b.t)) {
+    lines.push([new Date(r.t).toISOString(), r.rideName, r.elapsed, r.block,
+      r.power == null ? '' : Math.round(r.power), r.hr == null ? '' : Math.round(r.hr), r.mmol]);
+  }
+  download('lactate-log.csv', lines.map((l) => l.map(cell).join(',')).join('\n') + '\n', 'text/csv');
+}
+
+// ------------------------------------------------------- summary and export
+
+const fmtNum = (v, unit, digits) => (v == null ? '--' : v.toFixed(digits || 0) + (unit || ''));
+const fmtDate = (t) => new Date(t).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+
+function download(name, text, type) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = el('a', { href: url, download: name });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function rideNotes(ride) {
+  const lines = [ride.name];
+  for (const r of lactate.filter((x) => x.rideId === ride.id).sort((a, b) => a.elapsed - b.elapsed)) {
+    lines.push('Lactate ' + r.mmol + ' mmol/L at ' + fmtShort(r.elapsed * 1000) +
+      ' (' + fmtNum(r.power, ' W') + ', ' + fmtNum(r.hr, ' bpm') + ')');
+  }
+  return lines.join('\n');
+}
+
+function xmlText(v) {
+  return String(v).replace(/[<>&'"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[c]));
+}
+
+function buildTcx(ride) {
+  const st = ride.stats;
+  const iso = (t) => new Date(t).toISOString();
+  const hrTag = (name, v) => (v == null ? '' : '<' + name + '><Value>' + Math.round(v) + '</Value></' + name + '>');
+  const points = ride.samples.map((s) =>
+    '<Trackpoint><Time>' + iso(s[0]) + '</Time>' +
+    hrTag('HeartRateBpm', s[2]) +
+    (s[3] == null ? '' : '<Cadence>' + Math.min(254, s[3]) + '</Cadence>') +
+    (s[1] == null ? '' : '<Extensions><ns3:TPX><ns3:Watts>' + Math.max(0, s[1]) + '</ns3:Watts></ns3:TPX></Extensions>') +
+    '</Trackpoint>');
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2"' +
+      ' xmlns:ns3="http://www.garmin.com/xmlschemas/ActivityExtension/v2"' +
+      ' xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">',
+    '<Activities><Activity Sport="Biking">',
+    '<Id>' + iso(ride.startedAt) + '</Id>',
+    '<Lap StartTime="' + iso(ride.startedAt) + '">',
+    '<TotalTimeSeconds>' + st.secs + '</TotalTimeSeconds><DistanceMeters>0</DistanceMeters>',
+    '<Calories>' + Math.min(65535, Math.round(st.kj)) + '</Calories>',
+    hrTag('AverageHeartRateBpm', st.avgHr) + hrTag('MaximumHeartRateBpm', st.maxHr),
+    '<Intensity>Active</Intensity>',
+    st.avgCad == null ? '' : '<Cadence>' + Math.min(254, Math.round(st.avgCad)) + '</Cadence>',
+    '<TriggerMethod>Manual</TriggerMethod>',
+    '<Track>', points.join('\n'), '</Track>',
+    st.avgP == null ? '' : '<Extensions><ns3:LX><ns3:AvgWatts>' + Math.round(st.avgP) + '</ns3:AvgWatts></ns3:LX></Extensions>',
+    '</Lap>',
+    '<Notes>' + xmlText(rideNotes(ride)) + '</Notes>',
+    '<Creator xsi:type="Device_t"><Name>ERG Trainer</Name><UnitId>0</UnitId><ProductID>0</ProductID>' +
+      '<Version><VersionMajor>1</VersionMajor><VersionMinor>0</VersionMinor><BuildMajor>0</BuildMajor><BuildMinor>0</BuildMinor></Version></Creator>',
+    '</Activity></Activities>',
+    '</TrainingCenterDatabase>',
+  ].filter(Boolean).join('\n') + '\n';
+}
+
+function tcxFileName(ride) {
+  const d = new Date(ride.startedAt);
+  const pad = (v) => String(v).padStart(2, '0');
+  const slug = ride.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'ride';
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + '-' + slug + '.tcx';
+}
+
+// Power and heart rate against riding time, each on its own scale.
+function rideChart(ride) {
+  const S = ride.samples;
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'chart');
+  svg.setAttribute('viewBox', '0 0 1000 100');
+  svg.setAttribute('preserveAspectRatio', 'none');
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', 'Power and heart rate over the ride');
+  const size = Math.max(1, Math.ceil(S.length / 500));
+  const line = (col, lo, hi, cls) => {
+    const pts = [];
+    for (let i = 0; i < S.length; i += size) {
+      const v = mean(S.slice(i, i + size).map((s) => s[col]).filter((x) => x != null));
+      if (v != null) pts.push((i / S.length * 1000).toFixed(1) + ',' + (96 - clamp((v - lo) / (hi - lo), 0, 1) * 92).toFixed(1));
+    }
+    return '<polyline class="' + cls + '" points="' + pts.join(' ') + '"/>';
+  };
+  const maxP = Math.max(100, ...S.map((s) => s[1] || 0));
+  const hrs = S.map((s) => s[2]).filter((v) => v != null);
+  svg.innerHTML = line(1, 0, maxP * 1.1, 'p') + (hrs.length ? line(2, Math.min(...hrs) - 10, Math.max(...hrs) + 5, 'h') : '');
+  return svg;
+}
+
+function renderSummary() {
+  const box = $('summary-body');
+  const ride = rides.find((r) => r.id === shownRideId);
+  if (!ride) { box.replaceChildren(el('div', { class: 'note', text: 'That ride is no longer saved.' })); return; }
+  const st = ride.stats;
+  const stat = (label, value) => el('div', { class: 'stat' }, el('div', { class: 'label', text: label }), el('div', { class: 'v', text: value }));
+  const has = ride.samples.length > 0;
+  const clock = el('input', { type: 'text', placeholder: 'min:sec', 'aria-label': 'Time of reading as minutes and seconds', style: 'width:100px' });
+  const mmol = el('input', { type: 'number', min: 0.1, max: 30, step: 0.1, placeholder: 'mmol/L', 'aria-label': 'Lactate reading in mmol per litre', style: 'width:110px' });
+
+  box.replaceChildren(
+    el('div', { class: 'pane-head' },
+      el('h2', { text: ride.name }),
+      el('button', { text: 'All rides', onclick: () => showView('rides') }),
+      el('button', { class: 'primary', text: 'Download TCX', disabled: !has, onclick: () => download(tcxFileName(ride), buildTcx(ride), 'application/vnd.garmin.tcx+xml') })),
+    el('div', { class: 'note', text: fmtDate(ride.startedAt) + (has ? '' : '. Samples were dropped to save space, so this ride can no longer be exported.') }),
+    el('div', { class: 'stats' },
+      stat('Riding time', fmtShort(st.secs * 1000)),
+      stat('Average power', fmtNum(st.avgP, ' W')),
+      stat('Normalized power', fmtNum(st.np, ' W')),
+      stat('Average HR', fmtNum(st.avgHr, ' bpm')),
+      stat('Max HR', fmtNum(st.maxHr, ' bpm')),
+      stat('Average cadence', fmtNum(st.avgCad, ' rpm')),
+      stat('Work', fmtNum(st.kj, ' kJ')),
+      stat('HR drift', st.drift == null ? '--' : (st.drift > 0 ? '+' : '') + st.drift.toFixed(1) + ' %')),
+    has ? rideChart(ride) : null,
+    has ? el('div', { class: 'legend' }, el('span', { class: 'kp', text: 'Power' }), ' and ', el('span', { class: 'kh', text: 'heart rate' }), ' against riding time. Each line has its own scale.') : null,
+    el('h3', { text: 'Lactate readings' }),
+    lactateTable(lactate.filter((x) => x.rideId === ride.id).sort((a, b) => a.elapsed - b.elapsed), false),
+    el('div', { class: 'row' }, clock, mmol,
+      el('button', { text: 'Add reading', onclick: () => addLactateAfterRide(ride, clock.value, mmol.value) })));
+}
+
+function renderRides() {
+  const box = $('rides-body');
+  if (!rides.length) { box.replaceChildren(el('div', { class: 'note', text: 'No rides recorded yet.' })); return; }
+  const rows = rides.map((r) => el('tr', null,
+    el('td', { text: fmtDate(r.startedAt) }),
+    el('td', { text: r.name }),
+    el('td', { text: fmtShort(r.stats.secs * 1000) }),
+    el('td', { text: fmtNum(r.stats.avgP, ' W') }),
+    el('td', { text: fmtNum(r.stats.avgHr, ' bpm') }),
+    el('td', null, el('button', { text: 'Open', onclick: () => { shownRideId = r.id; showView('summary'); } })),
+    el('td', null, el('button', {
+      text: 'Delete',
+      onclick: () => {
+        if (!confirm('Delete the ride "' + r.name + '" from ' + fmtDate(r.startedAt) + '? Its lactate readings stay in the lactate log.')) return;
+        rides = rides.filter((x) => x !== r);
+        saveRides();
+        renderRides();
+      },
+    }))));
+  box.replaceChildren(el('div', { class: 'tscroll' }, el('table', null,
+    el('thead', null, el('tr', null, ...['Date', 'Ride', 'Time', 'Avg power', 'Avg HR', '', ''].map((h) => el('th', { text: h })))),
+    el('tbody', null, ...rows))));
+}
+
+// ---------------------------------------------------------------- settings
+
+const SETTING_FIELDS = [
+  ['capOn', 'Heart rate cap lowers power automatically'],
+  ['ceiling', 'Heart rate ceiling (bpm)', 80, 220],
+  ['capWindow', 'Rolling average window (s)', 5, 120],
+  ['capDelay', 'Time over the ceiling before each power cut (s)', 5, 600],
+  ['capStep', 'Size of each power step (W)', 1, 25],
+  ['capMargin', 'Recovery margin under the ceiling (bpm)', 1, 30],
+  ['capHold', 'Time under the margin before power is restored (s)', 5, 1200],
+  ['capGrace', 'No cap for this long at the start of a ride (s)', 0, 1800],
+  ['minW', 'Lowest target the app may send (W)', 0, 200],
+  ['maxW', 'Highest target the app may send (W)', 100, 1000],
+  ['smoothSecs', 'Power smoothing (s)', [1, 3, 5]],
+];
+
+function setSetting(key, value) {
+  settings[key] = value;
+  saveJson(SETTINGS_KEY, settings);
+  if (key === 'capOn' && !value) { resetCap(); pushTarget(); }
+  if (key === 'minW' || key === 'maxW') pushTarget();
+  renderSettings();
+}
+
+function renderSettings() {
+  const grid = el('div', { class: 'set' });
+  for (const [key, label, lo, hi] of SETTING_FIELDS) {
+    const id = 'set-' + key;
+    let input;
+    if (typeof settings[key] === 'boolean') {
+      input = el('input', { id, type: 'checkbox', checked: settings[key], onchange: (e) => setSetting(key, e.target.checked) });
+    } else if (Array.isArray(lo)) {
+      input = el('select', { id, onchange: (e) => setSetting(key, Number(e.target.value)) },
+        ...lo.map((v) => el('option', { value: v, text: v, selected: v === settings[key] })));
+    } else {
+      input = el('input', {
+        id, type: 'number', min: lo, max: hi, value: settings[key],
+        onchange: (e) => {
+          const v = Math.round(clamp(Number(e.target.value), lo, hi));
+          const crossed = (key === 'minW' && v >= settings.maxW) || (key === 'maxW' && v <= settings.minW);
+          if (Number.isFinite(v) && !crossed) setSetting(key, v); else renderSettings();
+        },
+      });
+    }
+    grid.append(el('label', { for: id, text: label }), input);
+  }
+  const near = lactate.filter((r) => r.hr != null && Math.abs(r.hr - settings.ceiling) <= 5).sort((a, b) => b.t - a.t)[0];
+  $('settings-body').replaceChildren(
+    grid,
+    el('div', { class: 'note', text: near
+      ? 'Most recent lactate reading within 5 bpm of the ceiling: ' + near.mmol + ' mmol/L at ' + Math.round(near.hr) + ' bpm on ' + fmtDate(near.t) + '. Aim for under about 1.5 mmol/L at the ceiling.'
+      : 'No lactate reading within 5 bpm of the ceiling yet. Aim for under about 1.5 mmol/L at the ceiling.' }),
+    el('div', { class: 'note', text: 'The cap works only while a ride is being recorded and a heart rate strap is connected.' }));
+}
+
 // ------------------------------------------------------------------ render
 
 function smoothedPower(now) {
   let sum = 0, n = 0;
-  for (const s of state.samples) if (s.t >= now - SMOOTH_MS) { sum += s.w; n++; }
+  for (const s of state.samples) if (s.t >= now - settings.smoothSecs * 1000) { sum += s.w; n++; }
   return n ? sum / n : null;
 }
 
@@ -1239,7 +1863,16 @@ function render() {
   const diff = power != null && state.accepted != null ? Math.round(power - state.accepted) : null;
   $('s-power').textContent = diff == null ? '' : (diff > 0 ? '+' : '') + diff + ' W against target';
 
-  $('clock').textContent = fmtClock(state.rideMs);
+  const cut = !state.noCap && cap.watts < 0;
+  if (cut) $('s-target').textContent = 'Heart rate cap: ' + cap.watts + ' W from ' + state.base + ' W. ' + sub;
+  $('tile-target').classList.toggle('capped', cut);
+  $('l-power').textContent = 'Power (' + settings.smoothSecs + ' s)';
+  $('tile-hr').classList.toggle('over', settings.capOn && hr != null && hr > settings.ceiling);
+  $('s-hr').textContent = !settings.capOn ? 'Cap off'
+    : 'Ceiling ' + settings.ceiling + ' bpm' + (rec && cap.avg != null ? ', ' + settings.capWindow + ' s average ' + Math.round(cap.avg) : '');
+  $('clock').textContent = fmtClock(rec ? rec.samples.length * 1000 : 0);
+  $('btn-ride').textContent = rec ? 'Finish ride' : 'Start ride';
+  $('btn-lactate').disabled = !rec;
   $('alert').hidden = !state.alert;
   $('alert').textContent = state.alert || '';
   renderRun();
@@ -1270,11 +1903,8 @@ setInterval(() => {
   const now = performance.now();
   const dt = now - lastTick;
   lastTick = now;
-  const last = state.samples[state.samples.length - 1];
-  const pedalling = (last && now - last.t < STALE_MS && last.w > 0) ||
-                    (now - state.cadenceAt < STALE_MS && state.cadence > 0);
-  if (pedalling && dt < 2000) state.rideMs += dt;
   runTick(now, dt);
+  recTick(now, dt);
   render();
 }, 250);
 
@@ -1283,11 +1913,25 @@ setInterval(() => {
 $('btn-trainer').addEventListener('click', () => toggleDevice('trainer'));
 $('btn-hr').addEventListener('click', () => toggleDevice('hr'));
 $('btn-sim').addEventListener('click', toggleSim);
-$('btn-reset').addEventListener('click', () => { state.rideMs = 0; render(); });
+$('btn-ride').addEventListener('click', () => {
+  if (!rec) { startRide('Free ride'); render(); return; }
+  if (confirm('Finish the ride and save it?')) finishRide();
+});
+$('btn-lactate').addEventListener('click', openLactateDialog);
+$('btn-lac-cancel').addEventListener('click', () => $('dlg-lactate').close());
+$('form-lactate').addEventListener('submit', saveLactateDialog);
+$('btn-lac-csv').addEventListener('click', exportLactateCsv);
+$('btn-defaults').addEventListener('click', () => {
+  if (!confirm('Reset all settings to their defaults?')) return;
+  Object.assign(settings, DEFAULTS);
+  saveJson(SETTINGS_KEY, settings);
+  renderSettings();
+});
+for (const v of ['rides', 'lactate', 'settings']) $('nav-' + v).addEventListener('click', () => showView(v));
 $('btn-set').addEventListener('click', () => applyTarget(Number($('target-input').value)));
 $('btn-plus').addEventListener('click', () => nudge(STEP_W));
 $('btn-minus').addEventListener('click', () => nudge(-STEP_W));
-$('btn-easy').addEventListener('click', () => applyTarget(EASY_W));
+$('btn-easy').addEventListener('click', () => applyTarget(EASY_W, true));
 $('target-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { applyTarget(Number(e.target.value)); e.target.blur(); }
 });
@@ -1319,6 +1963,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowUp') { adjust(STEP_W); e.preventDefault(); }
   if (e.key === 'ArrowDown') { adjust(-STEP_W); e.preventDefault(); }
   if (e.key === '0' && run) adjust(0);
+  if ((e.key === 'l' || e.key === 'L') && rec) openLactateDialog();
   if (e.key === ' ' && run) { goAction(); e.preventDefault(); }
 });
 
