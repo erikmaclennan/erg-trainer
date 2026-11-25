@@ -210,6 +210,7 @@
   .keys { display: flex; flex-wrap: wrap; gap: 6px 16px; color: var(--muted); font-size: 13px; margin-bottom: 16px; }
   .keys i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
   .page a { color: var(--accent); }
+  #ai-status.err { color: var(--bad); }
   .page textarea { width: 100%; min-height: 90px; resize: vertical; font: inherit; color: inherit; }
   .field { display: block; margin: 10px 0 4px; color: var(--muted); font-size: 14px; }
   .wide { width: 100%; }
@@ -274,6 +275,7 @@
   <span class="spacer"></span>
   <span class="pill">Ride time</span>
   <span id="clock">0:00:00</span>
+  <span class="pill" id="dist" title="Estimated from power on a flat road"></span>
   <button id="btn-ride">Start ride</button>
   <button id="btn-lactate" disabled>Log lactate</button>
 </header>
@@ -367,6 +369,7 @@
   </div>
   <div id="wk-editor" hidden>
     <div class="pane-head"><h2>Edit workout</h2></div>
+    <div class="note" id="ed-note" hidden></div>
     <input id="ed-name" type="text" maxlength="80" aria-label="Workout name">
     <div class="ed-scroll"><div id="ed-rows"></div></div>
     <svg class="profile" id="ed-profile" viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true"></svg>
@@ -504,6 +507,7 @@ const DEFAULTS = {
   minW: 50, maxW: 400, smoothSecs: 3,
   stopMmol: 4, testStart: 100, testStep: 20, testMins: 5, testCount: 6,
   theme: 'dark', colors: null,
+  distOn: true, massKg: 85, ftp: 0,
 };
 const settings = Object.assign({}, DEFAULTS, loadJson(SETTINGS_KEY, {}));
 
@@ -1207,6 +1211,7 @@ function renderWorkouts() {
   if (draft) { renderEditor(); return; }
   const list = $('wk-list');
   list.replaceChildren();
+  list.append(aiCard());
   if (!workouts.length) list.append(el('div', { class: 'empty', text: 'No workouts saved. Make a new one or restore the presets.' }));
   for (const w of workouts) {
     const parts = w.blocks.map((b, i) => describeBlock(w, i)).join(', ');
@@ -1328,6 +1333,8 @@ function restorePresets() {
 
 function renderEditor() {
   $('ed-name').value = draft.name;
+  $('ed-note').hidden = !draft.note;
+  $('ed-note').textContent = draft.note || '';
   const rows = $('ed-rows');
   rows.replaceChildren();
   for (const h of ['', 'Type', 'Watts', 'End watts', 'Min', 'Sec', '']) rows.append(el('div', { class: 'h', text: h }));
@@ -1663,6 +1670,7 @@ function recTick(now, dt) {
       state.cadence != null && fresh(state.cadenceAt) ? Math.round(state.cadence) : null,
       state.target,
     ]);
+    if (settings.distOn) rec.meters = (rec.meters || 0) + speedFor(rec.samples[rec.samples.length - 1][1] || 0, settings.massKg);
     capTick();
   }
   if (recCarry >= 1000) recCarry = 0;
@@ -1759,6 +1767,7 @@ function finishRide() {
   }
   ride.startedAt = ride.samples[0][0];
   ride.stats = rideStats(ride);
+  if (ride.meters != null) { ride.stats.meters = ride.meters; ride.stats.massKg = settings.massKg; }
   rides.unshift(ride);
   saveRides();
   log('Ride saved: ' + ride.name + ', ' + fmtShort(ride.stats.secs * 1000));
@@ -1767,6 +1776,28 @@ function finishRide() {
 }
 
 const mean = (list) => (list.length ? list.reduce((a, b) => a + b, 0) / list.length : null);
+
+// Estimated distance. A trainer has no real road speed, so this is the steady speed
+// the same power would give on a flat road with no wind: rolling resistance plus air drag.
+const ROAD = { crr: 0.004, cda: 0.32, rho: 1.225, drivetrain: 0.975 };
+
+function speedFor(watts, massKg) {
+  if (!(watts > 0)) return 0;
+  const power = watts * ROAD.drivetrain;
+  const drag = 0.5 * ROAD.rho * ROAD.cda;
+  const roll = ROAD.crr * massKg * 9.81;
+  let v = Math.cbrt(power / drag);
+  for (let i = 0; i < 8; i++) v -= (drag * v * v * v + roll * v - power) / (3 * drag * v * v + roll);
+  return v;                                   // metres per second
+}
+
+// Cumulative metres at each sample, or null for rides recorded without the estimate.
+function distanceSeries(ride) {
+  if (!ride.stats || ride.stats.meters == null) return null;
+  const mass = ride.stats.massKg || DEFAULTS.massKg;
+  let total = 0;
+  return ride.samples.map((s) => { total += speedFor(s[1] || 0, mass); return total; });
+}
 
 function rideStats(ride) {
   const S = ride.samples;
@@ -2111,8 +2142,10 @@ function buildTcx(ride) {
   const st = ride.stats;
   const iso = (t) => new Date(t).toISOString();
   const hrTag = (name, v) => (v == null ? '' : '<' + name + '><Value>' + Math.round(v) + '</Value></' + name + '>');
-  const points = ride.samples.map((s) =>
+  const dist = distanceSeries(ride);
+  const points = ride.samples.map((s, i) =>
     '<Trackpoint><Time>' + iso(s[0]) + '</Time>' +
+    (dist ? '<DistanceMeters>' + dist[i].toFixed(1) + '</DistanceMeters>' : '') +
     hrTag('HeartRateBpm', s[2]) +
     (s[3] == null ? '' : '<Cadence>' + Math.min(254, s[3]) + '</Cadence>') +
     (s[1] == null ? '' : '<Extensions><ns3:TPX><ns3:Watts>' + Math.max(0, s[1]) + '</ns3:Watts></ns3:TPX></Extensions>') +
@@ -2125,7 +2158,7 @@ function buildTcx(ride) {
     '<Activities><Activity Sport="Biking">',
     '<Id>' + iso(ride.startedAt) + '</Id>',
     '<Lap StartTime="' + iso(ride.startedAt) + '">',
-    '<TotalTimeSeconds>' + st.secs + '</TotalTimeSeconds><DistanceMeters>0</DistanceMeters>',
+    '<TotalTimeSeconds>' + st.secs + '</TotalTimeSeconds><DistanceMeters>' + (dist && dist.length ? dist[dist.length - 1].toFixed(1) : '0') + '</DistanceMeters>',
     '<Calories>' + Math.min(65535, Math.round(st.kj)) + '</Calories>',
     hrTag('AverageHeartRateBpm', st.avgHr) + hrTag('MaximumHeartRateBpm', st.maxHr),
     '<Intensity>Active</Intensity>',
@@ -2171,18 +2204,22 @@ function buildFit(ride) {
   message(0, 0, [[0, 'enum', 4], [1, 'u16', 255], [2, 'u16', 0], [3, 'u32z', 1], [4, 'u32', start]]);            // file_id: activity
   message(1, 21, [[253, 'u32', start], [0, 'enum', 0], [1, 'enum', 0]]);                                          // event: timer start
 
-  const record = (s) => [[253, 'u32', stamp(s[0])], [3, 'u8', s[2]], [4, 'u8', s[3] == null ? null : Math.min(254, s[3])], [7, 'u16', s[1]]];
-  define(2, 20, record(S[0]));
-  for (const s of S) data(2, record(s));
+  const dist = distanceSeries(ride);
+  const mass = ride.stats.massKg || DEFAULTS.massKg;
+  const total = dist ? [[9, 'u32', dist[dist.length - 1] * 100]] : [];                                            // total_distance, cm
+  const record = (s, i) => [[253, 'u32', stamp(s[0])], [3, 'u8', s[2]], [4, 'u8', s[3] == null ? null : Math.min(254, s[3])], [7, 'u16', s[1]]]
+    .concat(dist ? [[5, 'u32', dist[i] * 100], [6, 'u16', speedFor(s[1] || 0, mass) * 1000]] : []);                // distance cm, speed mm/s
+  define(2, 20, record(S[0], 0));
+  S.forEach((s, i) => data(2, record(s, i)));
 
   message(1, 21, [[253, 'u32', end], [0, 'enum', 0], [1, 'enum', 4]]);                                            // event: timer stop
   message(3, 19, [[253, 'u32', end], [0, 'enum', 9], [1, 'enum', 1], [2, 'u32', start],                           // lap
     [7, 'u32', st.elapsedSecs * 1000], [8, 'u32', st.secs * 1000], [11, 'u16', st.kj],
-    [15, 'u8', st.avgHr], [16, 'u8', st.maxHr], [17, 'u8', st.avgCad], [19, 'u16', st.avgP], [20, 'u16', maxP], [25, 'enum', 2]]);
+    [15, 'u8', st.avgHr], [16, 'u8', st.maxHr], [17, 'u8', st.avgCad], [19, 'u16', st.avgP], [20, 'u16', maxP], [25, 'enum', 2]].concat(total));
   message(4, 18, [[253, 'u32', end], [0, 'enum', 8], [1, 'enum', 1], [2, 'u32', start], [5, 'enum', 2], [6, 'enum', 58],  // session: cycling, virtual activity
     [7, 'u32', st.elapsedSecs * 1000], [8, 'u32', st.secs * 1000], [11, 'u16', st.kj],
     [16, 'u8', st.avgHr], [17, 'u8', st.maxHr], [18, 'u8', st.avgCad], [20, 'u16', st.avgP], [21, 'u16', maxP],
-    [25, 'u16', 0], [26, 'u16', 1], [34, 'u16', st.np], [48, 'u32', st.kj * 1000]]);
+    [25, 'u16', 0], [26, 'u16', 1], [34, 'u16', st.np], [48, 'u32', st.kj * 1000]].concat(total));
   message(5, 34, [[253, 'u32', end], [0, 'u32', st.secs * 1000], [1, 'u16', 1], [2, 'enum', 0], [3, 'enum', 26], [4, 'enum', 1]]);  // activity
 
   const table = [0x0000, 0xcc01, 0xd801, 0x1400, 0xf001, 0x3c00, 0x2800, 0xe401, 0xa001, 0x6c00, 0x7800, 0xb401, 0x5000, 0x9c01, 0x8801, 0x4400];
@@ -2264,6 +2301,8 @@ function renderSummary() {
       stat('Max HR', fmtNum(st.maxHr, ' bpm')),
       stat('Average cadence', fmtNum(st.avgCad, ' rpm')),
       stat('Work', fmtNum(st.kj, ' kJ')),
+      st.meters != null ? stat('Distance (est.)', (st.meters / 1000).toFixed(2) + ' km') : null,
+      st.meters != null && st.secs ? stat('Avg speed (est.)', (st.meters / st.secs * 3.6).toFixed(1) + ' km/h') : null,
       stat('HR drift', st.drift == null ? '--' : (st.drift > 0 ? '+' : '') + st.drift.toFixed(1) + ' %')),
     has ? rideChart(ride) : null,
     has ? el('div', { class: 'legend' }, el('span', { class: 'kp', text: 'Power' }), ' and ', el('span', { class: 'kh', text: 'heart rate' }), ' against riding time. Each line has its own scale.') : null,
@@ -2496,6 +2535,172 @@ function stravaPanel(ride) {
       })));
 }
 
+// ------------------------------------------------------- AI workout builder
+
+// Turns a plain-language description into a workout with the Claude API. The page calls
+// the API directly with the rider's own key, which is kept only in this browser. The app
+// has no build step and no dependencies, so this uses fetch and not the Anthropic SDK.
+
+const AI_KEY = 'erg.ai.v1';
+const AI_MODEL = 'claude-opus-5-5';
+const ai = Object.assign({ apiKey: '' }, loadJson(AI_KEY, {}));
+let aiState = { busy: false, text: '', error: false, prompt: '' };
+
+// Structured output schema. It mirrors the workout format; repeats hold only steady and ramp blocks.
+function aiSchema() {
+  const whole = (description) => ({ type: 'integer', description });
+  const block = (type, fields) => ({
+    type: 'object',
+    properties: Object.assign({ type: { type: 'string', enum: [type] } }, fields, { secs: whole('Length of the block in seconds, at least 5') }),
+    required: ['type'].concat(Object.keys(fields), ['secs']),
+    additionalProperties: false,
+  });
+  const steadyBlock = block('steady', { watts: whole('Target power in watts') });
+  const rampBlock = block('ramp', { from: whole('Power at the start in watts'), to: whole('Power at the end in watts') });
+  const repeatBlock = {
+    type: 'object',
+    properties: {
+      type: { type: 'string', enum: ['repeat'] },
+      times: whole('How many times the inner blocks are ridden, 1 to 50'),
+      blocks: { type: 'array', items: { anyOf: [steadyBlock, rampBlock] } },
+    },
+    required: ['type', 'times', 'blocks'],
+    additionalProperties: false,
+  };
+  return {
+    type: 'object',
+    properties: {
+      name: { type: 'string', description: 'Short title for the workout, at most 60 characters' },
+      summary: { type: 'string', description: 'One or two plain sentences on what was built and any assumption made' },
+      problem: { type: 'string', description: 'Empty when a workout was built. Otherwise why it could not be built.' },
+      blocks: { type: 'array', items: { anyOf: [steadyBlock, rampBlock, repeatBlock] } },
+    },
+    required: ['name', 'summary', 'problem', 'blocks'],
+    additionalProperties: false,
+  };
+}
+
+function aiSystemPrompt() {
+  return [
+    'You turn a rider\'s plain-language description into a structured indoor cycling workout for a web app that drives a smart trainer in ERG mode. The app sets the trainer\'s target power for every block, so each block needs explicit watts. The rider reviews your workout in an editor before saving it.',
+    '',
+    'Workout format:',
+    '- A workout is an ordered list of blocks.',
+    '- steady: one target power held for a duration.',
+    '- ramp: power moving in a straight line from a start value to an end value over a duration. Use ramps for warm ups and cool downs.',
+    '- repeat: a group of steady or ramp blocks ridden a number of times. Use it for intervals in place of writing each one out. Repeats cannot contain other repeats.',
+    '- Durations are whole seconds. Power is whole watts between ' + settings.minW + ' and ' + settings.maxW + ', the range this rider allows; the app clamps anything outside it.',
+    '',
+    'About this rider:',
+    settings.ftp > 0
+      ? '- FTP is ' + settings.ftp + ' W. Convert zones, percentages of FTP and effort words to watts from this.'
+      : '- FTP is not known. When the rider gives intensity as a zone, a percentage or a feeling and no watts, choose conservative watts for a recreational rider and say in the summary what you assumed, so they can adjust it.',
+    '- Their heart rate ceiling for easy aerobic riding is ' + settings.ceiling + ' bpm. The app lowers power automatically above it, so you do not need to plan around it.',
+    '',
+    'How to build it:',
+    '- Follow any durations, powers and interval counts the rider states exactly. If they give a total time, make the blocks add up to it.',
+    '- Include a warm up ramp and a cool down ramp unless the rider says not to or the stated time leaves no room.',
+    '- Put recoveries between hard efforts inside the repeat, at an easy power.',
+    '- Name the workout the way a rider would label it. Keep the summary to what you built and what you assumed.',
+    '- If the text does not describe a cycling workout, or it cannot be built in this format, return an empty blocks list and explain why in problem. Otherwise problem is an empty string.',
+  ].join('\n');
+}
+
+async function aiRequest(description) {
+  const body = JSON.stringify({
+    model: AI_MODEL,
+    max_tokens: 16000,
+    thinking: { type: 'adaptive' },
+    output_config: { effort: 'low', format: { type: 'json_schema', schema: aiSchema() } },
+    fallbacks: 'default',                     // if the model declines, the API reruns the request on a fallback model
+    system: aiSystemPrompt(),
+    messages: [{ role: 'user', content: description }],
+  });
+  for (let attempt = 1; ; attempt++) {
+    let res;
+    try {
+      res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': ai.apiKey,
+          'anthropic-version': '2026-10-21',
+          'anthropic-beta': 'server-side-fallback-2026-07-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body,
+      });
+    } catch (err) {
+      throw new Error('Could not reach the Anthropic API. Check the internet connection.');
+    }
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) return data;
+    const busy = res.status === 429 || res.status >= 500;
+    if (busy && attempt < 3) { await sleep(1500 * attempt); continue; }
+    const detail = data.error && data.error.message ? data.error.message : 'HTTP ' + res.status;
+    if (res.status === 401) throw new Error('The API key was rejected. Check it in Settings.');
+    if (res.status === 429) throw new Error('The API key is rate limited or out of credit: ' + detail);
+    if (res.status >= 500) throw new Error('The Anthropic API is busy. Try again in a moment.');
+    throw new Error(detail);
+  }
+}
+
+async function buildWorkoutFromText() {
+  const description = aiState.prompt.trim();
+  if (aiState.busy || !description) return;
+  aiState = { busy: true, text: 'Building the workout. This takes a few seconds.', error: false, prompt: aiState.prompt };
+  renderWorkouts();
+  try {
+    const data = await aiRequest(description);
+    if (data.stop_reason === 'refusal') throw new Error('The model declined this request.');
+    if (data.stop_reason === 'max_tokens') throw new Error('The reply was cut off. Try a shorter description.');
+    const text = (data.content || []).find((b) => b.type === 'text');
+    let out;
+    try { out = JSON.parse(text.text); } catch (err) { throw new Error('The reply could not be read as a workout.'); }
+    if (out.problem || !Array.isArray(out.blocks) || !out.blocks.length) throw new Error(out.problem || 'No workout came back.');
+    const w = cleanWorkout({ id: newId(), name: out.name, blocks: out.blocks });
+    if (!totalSecs(w)) throw new Error('The workout that came back had no usable blocks.');
+    const usage = data.usage || {};
+    log('AI workout built by ' + (data.model || AI_MODEL) + ': ' + (usage.input_tokens || 0) + ' tokens in, ' + (usage.output_tokens || 0) + ' out');
+    draft = Object.assign(JSON.parse(JSON.stringify(w)), { note: 'Built from your description. ' + String(out.summary || '').trim() + ' Check it, change anything you like, then save.' });
+    aiState = { busy: false, text: '', error: false, prompt: aiState.prompt };
+  } catch (err) {
+    log('AI workout builder failed: ' + err.message, 'err');
+    aiState = { busy: false, text: err.message, error: true, prompt: aiState.prompt };
+  }
+  if (!$('view-workouts').hidden) renderWorkouts();
+}
+
+function aiCard() {
+  const hasKey = !!ai.apiKey;
+  const box = el('textarea', {
+    id: 'ai-prompt', 'aria-label': 'Describe the workout you want',
+    placeholder: 'For example: 60 minutes easy with four 3 minute efforts at 220 W and 3 minutes easy between them',
+    oninput: (e) => { aiState.prompt = e.target.value; $('btn-ai-build').disabled = !hasKey || aiState.busy || !aiState.prompt.trim(); },
+  });
+  box.value = aiState.prompt;
+  return el('div', { class: 'wk' },
+    el('div', { class: 'wk-head' }, el('div', { class: 'wk-name', text: 'Describe a workout' })),
+    el('div', { class: 'wk-dur', text: 'Write what you want to ride and a model builds the blocks. You check the result in the editor before it is saved.' }),
+    el('div', { style: 'margin-top:10px' }, box),
+    el('div', { class: 'row' },
+      el('span', { id: 'ai-status', class: 'note' + (aiState.error ? ' err' : ''), text: aiState.text || (hasKey ? '' : 'Add an Anthropic API key in Settings to use this.') }),
+      el('span', { class: 'spacer' }),
+      el('button', { id: 'btn-ai-build', class: 'primary', text: aiState.busy ? 'Building' : 'Build workout', disabled: !hasKey || aiState.busy || !aiState.prompt.trim(), onclick: buildWorkoutFromText })));
+}
+
+function aiSettings() {
+  return el('div', null,
+    el('h3', { text: 'AI workout builder' }),
+    el('div', { class: 'note', text: 'Paste an Anthropic API key from console.anthropic.com to describe workouts in plain language on the Workouts tab. The key is stored only in this browser and is sent only to Anthropic. Use a key with a spending limit. Each workout costs a small fraction of a cent to a few cents.' }),
+    el('label', { class: 'field', for: 'ai-key', text: 'Anthropic API key' }),
+    el('input', {
+      id: 'ai-key', type: 'password', class: 'wide', value: ai.apiKey, autocomplete: 'off', spellcheck: 'false',
+      onchange: (e) => { ai.apiKey = e.target.value.trim(); saveJson(AI_KEY, ai); renderSettings(); },
+    }),
+    el('div', { class: 'note', text: ai.apiKey ? 'Key saved. Model: ' + AI_MODEL + '. Set your FTP above so zones and percentages become the right watts.' : 'No key saved.' }));
+}
+
 // ---------------------------------------------------------------- settings
 
 const SETTING_FIELDS = [
@@ -2511,6 +2716,9 @@ const SETTING_FIELDS = [
   ['maxW', 'Highest target the app may send (W)', 100, 1000],
   ['smoothSecs', 'Power smoothing (s)', [1, 3, 5]],
   ['stopMmol', 'Step test: suggest stopping at this lactate (mmol/L)', 2, 10],
+  ['distOn', 'Estimate distance and speed from power'],
+  ['massKg', 'Rider plus bike weight for the estimate (kg)', 40, 200],
+  ['ftp', 'FTP in watts, 0 if unknown (used by the AI workout builder)', 0, 600],
 ];
 
 function setSetting(key, value) {
@@ -2580,6 +2788,7 @@ function renderSettings() {
       : 'No lactate reading within 5 bpm of the ceiling yet. Aim for under about 1.5 mmol/L at the ceiling.' }),
     el('div', { class: 'note', text: 'The cap works only while a ride is being recorded and a heart rate strap is connected.' }),
     appearanceSettings(),
+    aiSettings(),
     stravaSettings());
 }
 
@@ -2636,6 +2845,7 @@ function render() {
   $('s-hr').textContent = !settings.capOn ? 'Cap off'
     : 'Ceiling ' + settings.ceiling + ' bpm' + (rec && cap.avg != null ? ', ' + settings.capWindow + ' s average ' + Math.round(cap.avg) : '');
   $('clock').textContent = fmtClock(rec ? rec.samples.length * 1000 : 0);
+  $('dist').textContent = rec && settings.distOn ? ((rec.meters || 0) / 1000).toFixed(2) + ' km' : '';
   $('btn-ride').textContent = rec ? 'Finish ride' : 'Start ride';
   $('btn-lactate').disabled = !rec;
   $('alert').hidden = !state.alert;

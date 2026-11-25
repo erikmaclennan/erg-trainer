@@ -17,6 +17,9 @@ Always use the same address. Saved data belongs to that address in that browser.
 - Run controls: start, pause, skip, end, manual power offset, auto-pause.
 - Heart rate cap that lowers power in steps while heart rate is over the ceiling, then restores it.
 - One-second ride recording, ride summary, TCX and FIT download.
+- Estimated distance and speed from power, for a flat road with no wind. It can be turned off in Settings.
+- AI workout builder: describe a workout in plain language and a Claude model builds the blocks for you to review.
+- Colour themes, including common editor palettes, with per-colour overrides.
 - Direct Strava upload as a Virtual Ride.
 - Lactate log with charts and CSV export, and a guided lactate step test.
 - Recovery of a ride in progress after an accidental reload.
@@ -37,6 +40,14 @@ One-time setup:
 3. Press "Connect to Strava" and approve the upload permission.
 
 After a ride, the summary has an "Upload to Strava" button. "Download TCX" stays available as the fallback.
+
+## AI workout builder
+
+1. Create an API key at https://console.anthropic.com and give it a spending limit.
+2. In the app, go to Settings and paste it under "AI workout builder". It is stored only in the browser's local storage and sent only to Anthropic.
+3. On the Workouts tab, describe the ride and press "Build workout". The result opens in the editor so you can check it before saving.
+
+Set your FTP in Settings so zones and percentages are converted to the right watts.
 
 ## Run it locally
 
