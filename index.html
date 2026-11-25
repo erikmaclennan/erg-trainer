@@ -1,0 +1,786 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ERG Trainer</title>
+<style>
+  :root {
+    --bg: #0a0c0f;
+    --panel: #12161b;
+    --line: #232a33;
+    --text: #f2f4f6;
+    --muted: #8793a1;
+    --accent: #ffb020;
+    --ok: #3ddc84;
+    --warn: #ffb020;
+    --bad: #ff5a52;
+    --sim: #6aa9ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+  button, input { font: inherit; color: inherit; }
+  button {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px 16px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  button:hover { border-color: var(--muted); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #111; font-weight: 600; }
+
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .device { display: flex; align-items: center; gap: 10px; }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: var(--muted);
+    min-width: 0;
+  }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--line); flex: none; }
+  .pill[data-st="on"] .dot { background: var(--ok); }
+  .pill[data-st="sim"] .dot { background: var(--sim); }
+  .pill[data-st="connecting"] .dot, .pill[data-st="reconnecting"] .dot { background: var(--warn); animation: blink 1s infinite; }
+  .pill[data-st="reconnecting"] { color: var(--warn); }
+  @keyframes blink { 50% { opacity: 0.25; } }
+  @media (prefers-reduced-motion: reduce) { .pill .dot { animation: none !important; } }
+  .spacer { flex: 1; }
+  #clock { font-size: 28px; font-variant-numeric: tabular-nums; font-weight: 600; }
+
+  #alert, #notice {
+    margin: 12px 16px 0;
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 18px;
+  }
+  #alert { background: #3a1513; border: 1px solid var(--bad); }
+  #notice { background: var(--panel); border: 1px solid var(--line); color: var(--muted); font-size: 15px; }
+  [hidden] { display: none !important; }
+
+  main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    padding: 12px 16px;
+  }
+  .tile {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 20px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-width: 0;
+  }
+  .tile .label { font-size: 18px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  .tile .value {
+    font-size: clamp(64px, 15vw, 220px);
+    line-height: 1;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+  }
+  .tile .value small { font-size: 0.22em; font-weight: 500; color: var(--muted); margin-left: 0.3em; letter-spacing: 0; }
+  .tile .sub { font-size: 16px; color: var(--muted); min-height: 1.3em; }
+  #tile-target .value { color: var(--accent); }
+  .tile.stale .value { color: var(--muted); }
+
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 12px 16px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+  }
+  footer label { color: var(--muted); font-size: 14px; }
+  #target-input {
+    width: 90px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 18px;
+    font-variant-numeric: tabular-nums;
+  }
+  .step { min-width: 64px; font-size: 18px; }
+  .hint { color: var(--muted); font-size: 13px; }
+
+  details { padding: 0 16px 12px; color: var(--muted); font-size: 13px; }
+  summary { cursor: pointer; padding: 6px 0; }
+  #log {
+    margin: 0;
+    max-height: 180px;
+    overflow: auto;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+  }
+  #log .err { color: var(--bad); }
+
+  @media (max-width: 640px) {
+    main { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="device">
+    <button id="btn-trainer">Connect trainer</button>
+    <span class="pill" id="pill-trainer" data-st="off"><span class="dot"></span><span class="txt">Trainer: not connected</span></span>
+  </div>
+  <div class="device">
+    <button id="btn-hr">Connect strap</button>
+    <span class="pill" id="pill-hr" data-st="off"><span class="dot"></span><span class="txt">Strap: not connected</span></span>
+  </div>
+  <button id="btn-sim">Start simulator</button>
+  <span class="spacer"></span>
+  <span class="pill">Ride time</span>
+  <span id="clock">0:00:00</span>
+  <button id="btn-reset" title="Reset ride time">Reset</button>
+</header>
+
+<div id="notice" hidden></div>
+<div id="alert" role="alert" hidden></div>
+
+<main>
+  <section class="tile" id="tile-target">
+    <div class="label">Target</div>
+    <div class="value"><span id="v-target">--</span><small>W</small></div>
+    <div class="sub" id="s-target">No target set</div>
+  </section>
+  <section class="tile stale" id="tile-power">
+    <div class="label">Power (3 s)</div>
+    <div class="value"><span id="v-power">--</span><small>W</small></div>
+    <div class="sub" id="s-power"></div>
+  </section>
+  <section class="tile stale" id="tile-hr">
+    <div class="label">Heart rate</div>
+    <div class="value"><span id="v-hr">--</span><small>bpm</small></div>
+    <div class="sub"></div>
+  </section>
+  <section class="tile stale" id="tile-cad">
+    <div class="label">Cadence</div>
+    <div class="value"><span id="v-cad">--</span><small>rpm</small></div>
+    <div class="sub"></div>
+  </section>
+</main>
+
+<footer>
+  <label for="target-input">Target power (W)</label>
+  <button class="step" id="btn-minus" aria-label="Lower target by 5 watts">-5</button>
+  <input id="target-input" type="number" inputmode="numeric" min="50" max="400" step="5" value="100">
+  <button class="step" id="btn-plus" aria-label="Raise target by 5 watts">+5</button>
+  <button class="primary" id="btn-set">Set target</button>
+  <button id="btn-easy">Easy (80 W)</button>
+  <span class="hint">Up / Down arrows: 5 W. Range 50 to 400 W.</span>
+</footer>
+
+<details>
+  <summary>Event log</summary>
+  <div id="log"></div>
+</details>
+
+<script>
+'use strict';
+
+// ---------------------------------------------------------------- constants
+
+const MIN_W = 50;
+const MAX_W = 400;
+const EASY_W = 80;
+const STEP_W = 5;
+const SMOOTH_MS = 3000;
+const STALE_MS = 4000;
+
+const UUID = {
+  ftms: 0x1826, indoorBikeData: 0x2ad2, controlPoint: 0x2ad9, machineStatus: 0x2ada,
+  cyclingPower: 0x1818, powerMeasurement: 0x2a63,
+  heartRate: 0x180d, heartRateMeasurement: 0x2a37,
+};
+
+const OP = { requestControl: 0x00, setTargetPower: 0x05, start: 0x07, response: 0x80 };
+const CP_RESULT = {
+  1: 'Success', 2: 'Command not supported', 3: 'Invalid parameter',
+  4: 'Operation failed', 5: 'Control not permitted',
+};
+
+// -------------------------------------------------------------------- state
+
+const state = {
+  target: null,        // watts the rider asked for
+  accepted: null,      // last target the trainer confirmed
+  pending: false,      // a target has been sent and not yet confirmed
+  alert: null,
+  samples: [],         // {t, w} power samples
+  cadence: null, cadenceAt: 0,
+  hr: null, hrAt: 0,
+  rideMs: 0,
+  conn: { trainer: { st: 'off' }, hr: { st: 'off' } },
+};
+
+let trainer = null;    // BleTrainer or SimTrainer
+let strap = null;      // BleHeartRate
+let sim = null;
+
+const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+function log(msg, level) {
+  const line = document.createElement('div');
+  if (level) line.className = level;
+  line.textContent = new Date().toLocaleTimeString() + '  ' + msg;
+  const box = $('log');
+  box.prepend(line);
+  while (box.children.length > 100) box.lastChild.remove();
+}
+
+// The hub is the only way devices talk to the rest of the app.
+const hub = {
+  conn(kind, st, name) {
+    state.conn[kind] = { st, name };
+    renderConn();
+  },
+  power(w) {
+    const t = performance.now();
+    state.samples.push({ t, w });
+    while (state.samples.length && state.samples[0].t < t - 10000) state.samples.shift();
+  },
+  cadence(rpm) { state.cadence = rpm; state.cadenceAt = performance.now(); },
+  hr(bpm) { state.hr = bpm; state.hrAt = performance.now(); },
+  accepted(w) {
+    state.accepted = w;
+    state.pending = false;
+    state.alert = null;
+    log('Trainer accepted target ' + w + ' W');
+  },
+  rejected(w, why) {
+    state.pending = false;
+    const last = state.accepted == null ? 'none' : state.accepted + ' W';
+    state.alert = 'Trainer rejected ' + w + ' W: ' + why + '. Last accepted target: ' + last + '.';
+    log(state.alert, 'err');
+  },
+};
+
+// ------------------------------------------------------------------ parsers
+
+function parseIndoorBikeData(dv) {
+  const flags = dv.getUint16(0, true);
+  const out = {};
+  let o = 2;
+  if (!(flags & 0x0001)) o += 2;                                    // instantaneous speed
+  if (flags & 0x0002) o += 2;                                       // average speed
+  if (flags & 0x0004) { out.cadence = dv.getUint16(o, true) / 2; o += 2; }
+  if (flags & 0x0008) o += 2;                                       // average cadence
+  if (flags & 0x0010) o += 3;                                       // total distance
+  if (flags & 0x0020) o += 2;                                       // resistance level
+  if (flags & 0x0040) { out.power = dv.getInt16(o, true); o += 2; }
+  return out;
+}
+
+function parsePowerMeasurement(dv) {
+  const flags = dv.getUint16(0, true);
+  const out = { power: dv.getInt16(2, true) };
+  let o = 4;
+  if (flags & 0x0001) o += 1;                                       // pedal power balance
+  if (flags & 0x0004) o += 2;                                       // accumulated torque
+  if (flags & 0x0010) o += 6;                                       // wheel revolution data
+  if (flags & 0x0020) {
+    out.crankRevs = dv.getUint16(o, true);
+    out.crankTime = dv.getUint16(o + 2, true);                      // 1/1024 s
+  }
+  return out;
+}
+
+function parseHeartRate(dv) {
+  return (dv.getUint8(0) & 0x01) ? dv.getUint16(1, true) : dv.getUint8(1);
+}
+
+// ---------------------------------------------------------------- BLE base
+
+class BleDevice {
+  constructor(kind, label, options) {
+    this.kind = kind;
+    this.label = label;
+    this.options = options;
+    this.closing = false;
+    this.retrying = false;
+  }
+
+  async connect() {
+    this.device = await navigator.bluetooth.requestDevice(this.options);
+    this.device.addEventListener('gattserverdisconnected', () => this.dropped());
+    await this.open('connecting');
+  }
+
+  get name() { return this.device.name || this.label; }
+
+  async open(st) {
+    hub.conn(this.kind, st, this.name);
+    const server = await this.device.gatt.connect();
+    await this.setup(server);
+    hub.conn(this.kind, 'on', this.name);
+    log(this.label + ' connected: ' + this.name);
+    this.ready();
+  }
+
+  async notify(service, uuid, handler) {
+    const ch = await service.getCharacteristic(uuid);
+    ch.addEventListener('characteristicvaluechanged', (e) => {
+      try { handler(e.target.value); } catch (err) { log(this.label + ' sent data that could not be read: ' + err.message, 'err'); }
+    });
+    await ch.startNotifications();
+    return ch;
+  }
+
+  setup() {}
+  ready() {}
+  lost() {}
+
+  async dropped() {
+    this.lost();
+    if (this.closing || this.retrying) return;
+    this.retrying = true;
+    log(this.label + ' disconnected. Trying to reconnect.', 'err');
+    while (!this.closing) {
+      try {
+        await this.open('reconnecting');
+        break;
+      } catch (err) {
+        if (this.closing) break;
+        hub.conn(this.kind, 'reconnecting', this.name);
+        await sleep(2000);
+      }
+    }
+    this.retrying = false;
+  }
+
+  disconnect() {
+    this.closing = true;
+    this.lost();
+    try { if (this.device && this.device.gatt.connected) this.device.gatt.disconnect(); } catch (err) { /* already gone */ }
+    hub.conn(this.kind, 'off');
+  }
+}
+
+// ------------------------------------------------------------------ trainer
+
+class BleTrainer extends BleDevice {
+  constructor() {
+    super('trainer', 'Trainer', {
+      filters: [{ services: [UUID.ftms] }, { services: [UUID.cyclingPower] }, { namePrefix: 'KICKR' }],
+      optionalServices: [UUID.ftms, UUID.cyclingPower],
+    });
+    this.cp = null;
+    this.chain = Promise.resolve();
+    this.waiting = null;
+    this.want = null;
+    this.flushing = false;
+    this.crank = null;
+  }
+
+  get canControl() { return !!this.cp; }
+
+  async setup(server) {
+    this.cp = null;
+    let ftms = null;
+    try { ftms = await server.getPrimaryService(UUID.ftms); } catch (err) { /* fall back below */ }
+
+    if (!ftms) {
+      const cps = await server.getPrimaryService(UUID.cyclingPower);
+      await this.notify(cps, UUID.powerMeasurement, (dv) => this.onPowerMeasurement(dv));
+      log('Trainer has no FTMS service. Reading power only, with no ERG control.', 'err');
+      return;
+    }
+
+    await this.notify(ftms, UUID.indoorBikeData, (dv) => {
+      const d = parseIndoorBikeData(dv);
+      if (d.power != null) hub.power(d.power);
+      if (d.cadence != null) hub.cadence(d.cadence);
+    });
+    try {
+      await this.notify(ftms, UUID.machineStatus, (dv) => this.onStatus(dv));
+    } catch (err) {
+      log('Trainer status messages are not available: ' + err.message);
+    }
+    this.cp = await this.notify(ftms, UUID.controlPoint, (dv) => this.onResponse(dv));
+    await this.command(OP.requestControl);
+    try { await this.command(OP.start); } catch (err) { log('Trainer did not confirm start: ' + err.message); }
+  }
+
+  ready() {
+    if (state.target == null) return;
+    if (this.canControl) { state.pending = true; this.setTarget(state.target); }
+  }
+
+  lost() {
+    this.cp = null;
+    this.crank = null;
+    if (this.waiting) {
+      clearTimeout(this.waiting.timer);
+      this.waiting.reject(new Error('Trainer disconnected'));
+      this.waiting = null;
+    }
+  }
+
+  // One control point command at a time; resolves on the trainer's reply.
+  command(op, bytes) {
+    const run = async () => {
+      const cp = this.cp;
+      if (!cp) throw new Error('Trainer is not connected');
+      const reply = new Promise((resolve, reject) => {
+        const timer = setTimeout(() => { this.waiting = null; reject(new Error('No reply from trainer')); }, 3000);
+        this.waiting = { op, resolve, reject, timer };
+      });
+      reply.catch(() => {});
+      try {
+        await cp.writeValueWithResponse(Uint8Array.from([op].concat(bytes || [])));
+      } catch (err) {
+        if (this.waiting) { clearTimeout(this.waiting.timer); this.waiting = null; }
+        throw err;
+      }
+      return reply;
+    };
+    const result = this.chain.then(run, run);
+    this.chain = result.catch(() => {});
+    return result;
+  }
+
+  onResponse(dv) {
+    if (dv.getUint8(0) !== OP.response || !this.waiting) return;
+    if (dv.getUint8(1) !== this.waiting.op) return;
+    const w = this.waiting;
+    this.waiting = null;
+    clearTimeout(w.timer);
+    const code = dv.getUint8(2);
+    if (code === 1) w.resolve();
+    else w.reject(new Error(CP_RESULT[code] || 'Error code ' + code));
+  }
+
+  onStatus(dv) {
+    const op = dv.getUint8(0);
+    if (op === 0xff) {
+      log('Trainer reports control was lost. Requesting it again.', 'err');
+      this.command(OP.requestControl).then(() => this.ready(), (err) => hub.rejected(state.target, err.message));
+    } else if (op === 0x02) {
+      log('Trainer reports stopped or paused');
+    } else if (op === 0x01) {
+      log('Trainer reports reset');
+    }
+  }
+
+  onPowerMeasurement(dv) {
+    const d = parsePowerMeasurement(dv);
+    hub.power(d.power);
+    if (d.crankRevs == null) return;
+    const now = performance.now();
+    const prev = this.crank;
+    if (!prev) { this.crank = { revs: d.crankRevs, time: d.crankTime, at: now }; return; }
+    const dRev = (d.crankRevs - prev.revs) & 0xffff;
+    const dT = ((d.crankTime - prev.time) & 0xffff) / 1024;
+    if (dRev > 0 && dT > 0) {
+      hub.cadence(dRev / dT * 60);
+      this.crank = { revs: d.crankRevs, time: d.crankTime, at: now };
+    } else if (now - prev.at > 3000) {
+      hub.cadence(0);
+    }
+  }
+
+  // Only the newest target matters, so older unsent ones are dropped.
+  setTarget(w) {
+    this.want = w;
+    if (!this.flushing) this.flush();
+  }
+
+  async flush() {
+    this.flushing = true;
+    try {
+      while (this.want != null && this.cp) {
+        const w = this.want;
+        this.want = null;
+        const bytes = [w & 0xff, (w >> 8) & 0xff];
+        try {
+          try {
+            await this.command(OP.setTargetPower, bytes);
+          } catch (err) {
+            if (err.message !== CP_RESULT[5]) throw err;
+            await this.command(OP.requestControl);
+            await this.command(OP.setTargetPower, bytes);
+          }
+          hub.accepted(w);
+        } catch (err) {
+          hub.rejected(w, err.message);
+        }
+      }
+    } finally {
+      this.flushing = false;
+    }
+  }
+}
+
+// ---------------------------------------------------------------- HR strap
+
+class BleHeartRate extends BleDevice {
+  constructor() {
+    super('hr', 'Strap', { filters: [{ services: [UUID.heartRate] }] });
+  }
+  async setup(server) {
+    const svc = await server.getPrimaryService(UUID.heartRate);
+    await this.notify(svc, UUID.heartRateMeasurement, (dv) => hub.hr(parseHeartRate(dv)));
+  }
+}
+
+// ---------------------------------------------------------------- simulator
+
+class SimTrainer {
+  constructor() {
+    this.canControl = true;
+    this.goal = null;
+    this.watts = 0;
+    this.bpm = 68;
+    hub.conn('trainer', 'sim', 'Simulated trainer');
+    hub.conn('hr', 'sim', 'Simulated strap');
+    this.timer = setInterval(() => this.tick(), 1000);
+    log('Simulator started');
+  }
+  tick() {
+    const goal = this.goal == null ? 120 : this.goal;
+    this.watts += (goal - this.watts) * 0.5;
+    const w = Math.max(0, Math.round(this.watts + (Math.random() - 0.5) * 8));
+    this.bpm += ((62 + w * 0.41) - this.bpm) / 40;
+    hub.power(w);
+    hub.cadence(88 + Math.round((Math.random() - 0.5) * 4));
+    hub.hr(Math.round(this.bpm));
+  }
+  setTarget(w) {
+    this.goal = w;
+    setTimeout(() => hub.accepted(w), 150);
+  }
+  disconnect() {
+    clearInterval(this.timer);
+    hub.conn('trainer', 'off');
+    hub.conn('hr', 'off');
+    log('Simulator stopped');
+  }
+}
+
+// ----------------------------------------------------------------- actions
+
+function applyTarget(w) {
+  if (!Number.isFinite(w)) return;
+  w = Math.round(clamp(w, MIN_W, MAX_W));
+  state.target = w;
+  $('target-input').value = w;
+  if (trainer && trainer.canControl) {
+    state.pending = true;
+    trainer.setTarget(w);
+  }
+  render();
+}
+
+function nudge(delta) {
+  const base = state.target != null ? state.target : Number($('target-input').value) || 100;
+  applyTarget(base + delta);
+}
+
+function stopSim() {
+  if (!sim) return;
+  sim.disconnect();
+  if (trainer === sim) trainer = null;
+  sim = null;
+  resetReadings();
+}
+
+function resetReadings() {
+  state.samples = [];
+  state.cadence = null;
+  state.hr = null;
+  state.accepted = null;
+  state.pending = false;
+}
+
+async function toggleDevice(kind) {
+  const current = kind === 'trainer' ? trainer : strap;
+  if (current && current !== sim) {
+    current.disconnect();
+    if (kind === 'trainer') { trainer = null; state.accepted = null; state.pending = false; } else strap = null;
+    log((kind === 'trainer' ? 'Trainer' : 'Strap') + ' disconnected');
+    renderConn();
+    return;
+  }
+  stopSim();
+  const dev = kind === 'trainer' ? new BleTrainer() : new BleHeartRate();
+  if (kind === 'trainer') trainer = dev; else strap = dev;
+  renderConn();
+  try {
+    await dev.connect();
+    keepAwake();
+  } catch (err) {
+    dev.disconnect();
+    if (kind === 'trainer') trainer = null; else strap = null;
+    renderConn();
+    if (err.name !== 'NotFoundError') {
+      state.alert = 'Could not connect: ' + err.message;
+      log(state.alert, 'err');
+    }
+  }
+}
+
+function toggleSim() {
+  if (sim) { stopSim(); renderConn(); return; }
+  if (trainer) { trainer.disconnect(); trainer = null; }
+  if (strap) { strap.disconnect(); strap = null; }
+  resetReadings();
+  sim = new SimTrainer();
+  trainer = sim;
+  if (state.target != null) { state.pending = true; sim.setTarget(state.target); }
+  keepAwake();
+  renderConn();
+}
+
+let wakeLock = null;
+async function keepAwake() {
+  if (!('wakeLock' in navigator) || wakeLock) return;
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', () => { wakeLock = null; });
+  } catch (err) { /* not fatal */ }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && (trainer || strap)) keepAwake();
+});
+
+// ------------------------------------------------------------------ render
+
+function smoothedPower(now) {
+  let sum = 0, n = 0;
+  for (const s of state.samples) if (s.t >= now - SMOOTH_MS) { sum += s.w; n++; }
+  return n ? sum / n : null;
+}
+
+function fmtClock(ms) {
+  const s = Math.floor(ms / 1000);
+  const pad = (v) => String(v).padStart(2, '0');
+  return Math.floor(s / 3600) + ':' + pad(Math.floor(s / 60) % 60) + ':' + pad(s % 60);
+}
+
+function setTile(tileId, valueId, value) {
+  $(tileId).classList.toggle('stale', value == null);
+  $(valueId).textContent = value == null ? '--' : Math.round(value);
+}
+
+function render() {
+  const now = performance.now();
+  const power = smoothedPower(now);
+  const cad = now - state.cadenceAt < STALE_MS ? state.cadence : null;
+  const hr = now - state.hrAt < STALE_MS ? state.hr : null;
+
+  setTile('tile-power', 'v-power', power);
+  setTile('tile-cad', 'v-cad', cad);
+  setTile('tile-hr', 'v-hr', hr);
+  $('v-target').textContent = state.target == null ? '--' : state.target;
+
+  let sub = 'No target set';
+  if (state.target != null) {
+    if (!trainer) sub = 'Trainer not connected. Target will be sent on connect.';
+    else if (!trainer.canControl) sub = 'This connection reads power only. No ERG control.';
+    else if (state.pending) sub = 'Sending to trainer';
+    else if (state.accepted === state.target) sub = 'Held by trainer';
+    else sub = 'Not accepted. Trainer is holding ' + (state.accepted == null ? 'no target' : state.accepted + ' W');
+  }
+  $('s-target').textContent = sub;
+
+  const diff = power != null && state.accepted != null ? Math.round(power - state.accepted) : null;
+  $('s-power').textContent = diff == null ? '' : (diff > 0 ? '+' : '') + diff + ' W against target';
+
+  $('clock').textContent = fmtClock(state.rideMs);
+  $('alert').hidden = !state.alert;
+  $('alert').textContent = state.alert || '';
+}
+
+function renderConn() {
+  const labels = { off: 'not connected', connecting: 'connecting', reconnecting: 'lost, reconnecting', on: '', sim: '' };
+  for (const [kind, title] of [['trainer', 'Trainer'], ['hr', 'Strap']]) {
+    const c = state.conn[kind];
+    const pill = $('pill-' + kind);
+    pill.dataset.st = c.st;
+    const text = labels[c.st] || c.name || '';
+    pill.querySelector('.txt').textContent = title + ': ' + text + (labels[c.st] && c.name ? ' (' + c.name + ')' : '');
+  }
+  const hasBt = 'bluetooth' in navigator;
+  $('btn-trainer').textContent = trainer && trainer !== sim ? 'Disconnect trainer' : 'Connect trainer';
+  $('btn-hr').textContent = strap ? 'Disconnect strap' : 'Connect strap';
+  $('btn-trainer').disabled = !hasBt;
+  $('btn-hr').disabled = !hasBt;
+  $('btn-sim').textContent = sim ? 'Stop simulator' : 'Start simulator';
+}
+
+// Ride time counts only while the pedals are turning.
+let lastTick = performance.now();
+setInterval(() => {
+  const now = performance.now();
+  const dt = now - lastTick;
+  lastTick = now;
+  const last = state.samples[state.samples.length - 1];
+  const pedalling = (last && now - last.t < STALE_MS && last.w > 0) ||
+                    (now - state.cadenceAt < STALE_MS && state.cadence > 0);
+  if (pedalling && dt < 2000) state.rideMs += dt;
+  render();
+}, 250);
+
+// ------------------------------------------------------------------ wiring
+
+$('btn-trainer').addEventListener('click', () => toggleDevice('trainer'));
+$('btn-hr').addEventListener('click', () => toggleDevice('hr'));
+$('btn-sim').addEventListener('click', toggleSim);
+$('btn-reset').addEventListener('click', () => { state.rideMs = 0; render(); });
+$('btn-set').addEventListener('click', () => applyTarget(Number($('target-input').value)));
+$('btn-plus').addEventListener('click', () => nudge(STEP_W));
+$('btn-minus').addEventListener('click', () => nudge(-STEP_W));
+$('btn-easy').addEventListener('click', () => applyTarget(EASY_W));
+$('target-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { applyTarget(Number(e.target.value)); e.target.blur(); }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.target instanceof HTMLInputElement || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === 'ArrowUp') { nudge(STEP_W); e.preventDefault(); }
+  if (e.key === 'ArrowDown') { nudge(-STEP_W); e.preventDefault(); }
+});
+
+if (!('bluetooth' in navigator)) {
+  $('notice').hidden = false;
+  $('notice').textContent = 'This browser has no Web Bluetooth, so real devices cannot connect. Use Chrome or Edge on the MacBook. The simulator still works here.';
+}
+
+renderConn();
+render();
+if (new URLSearchParams(location.search).has('sim')) toggleSim();
+</script>
+</body>
+</html>
