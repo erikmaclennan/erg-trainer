@@ -189,7 +189,12 @@
   #tile-hr.over .value { color: var(--bad); }
   #tile-target.capped .sub { color: var(--warn); }
   .page { flex: 1; padding: 16px; max-width: 920px; width: 100%; margin: 0 auto; }
-  .page input, .page select, dialog input {
+  .page a { color: var(--accent); }
+  .page textarea { width: 100%; min-height: 90px; resize: vertical; font: inherit; color: inherit; }
+  .field { display: block; margin: 10px 0 4px; color: var(--muted); font-size: 14px; }
+  .wide { width: 100%; }
+  #strava-status.err { color: var(--bad); }
+  .page input, .page select, .page textarea, dialog input {
     background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
   }
   .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
@@ -1738,7 +1743,9 @@ function renderSummary() {
     el('h3', { text: 'Lactate readings' }),
     lactateTable(lactate.filter((x) => x.rideId === ride.id).sort((a, b) => a.elapsed - b.elapsed), false),
     el('div', { class: 'row' }, clock, mmol,
-      el('button', { text: 'Add reading', onclick: () => addLactateAfterRide(ride, clock.value, mmol.value) })));
+      el('button', { text: 'Add reading', onclick: () => addLactateAfterRide(ride, clock.value, mmol.value) })),
+    el('h3', { text: 'Strava' }),
+    stravaPanel(ride));
 }
 
 function renderRides() {
@@ -1763,6 +1770,203 @@ function renderRides() {
   box.replaceChildren(el('div', { class: 'tscroll' }, el('table', null,
     el('thead', null, el('tr', null, ...['Date', 'Ride', 'Time', 'Avg power', 'Avg HR', '', ''].map((h) => el('th', { text: h })))),
     el('tbody', null, ...rows))));
+}
+
+// ------------------------------------------------------------------ strava
+
+// Everything here talks to Strava straight from the page. The API application's
+// Client ID and Client Secret and the tokens stay in this browser's local storage.
+
+const STRAVA_KEY = 'erg.strava.v1';
+const STRAVA_STATE_KEY = 'erg.strava.state';
+const strava = Object.assign(
+  { clientId: '', clientSecret: '', refreshToken: null, accessToken: null, expiresAt: 0, athlete: '' },
+  loadJson(STRAVA_KEY, {}));
+const saveStrava = () => saveJson(STRAVA_KEY, strava);
+const stravaRedirect = () => location.origin + location.pathname;
+
+let upload = { rideId: null, busy: false, text: '', error: false };
+const uploadDrafts = {};          // ride id -> { name, description } typed by the rider
+
+function stravaError(data, status) {
+  const parts = (data.errors || []).map((e) => [e.resource, e.field, e.code].filter(Boolean).join(' '));
+  return (data.message || data.error || 'Strava refused the request') + (parts.length ? ': ' + parts.join('; ') : '') + ' (HTTP ' + status + ')';
+}
+
+async function stravaFetch(url, options) {
+  let res;
+  try {
+    res = await fetch(url, options);
+  } catch (err) {
+    throw new Error('Could not reach Strava. Check the internet connection.');
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(stravaError(data, res.status));
+  return data;
+}
+
+async function stravaToken(params) {
+  const body = new URLSearchParams(Object.assign({ client_id: strava.clientId, client_secret: strava.clientSecret }, params));
+  const data = await stravaFetch('https://www.strava.com/oauth/token', { method: 'POST', body });
+  // Strava replaces the refresh token on every renewal, so always keep the newest one.
+  strava.accessToken = data.access_token;
+  strava.refreshToken = data.refresh_token;
+  strava.expiresAt = data.expires_at;
+  if (data.athlete) strava.athlete = [data.athlete.firstname, data.athlete.lastname].filter(Boolean).join(' ');
+  saveStrava();
+}
+
+async function stravaAccess() {
+  if (!strava.refreshToken) throw new Error('Strava is not connected. Connect it in Settings.');
+  if (!strava.accessToken || strava.expiresAt - 120 < Date.now() / 1000) {
+    await stravaToken({ grant_type: 'refresh_token', refresh_token: strava.refreshToken });
+  }
+  return strava.accessToken;
+}
+
+function connectStrava() {
+  if (!strava.clientId || !strava.clientSecret) { state.alert = 'Enter the Strava Client ID and Client Secret first.'; render(); return; }
+  if (rec) { state.alert = 'Finish the ride before connecting Strava. Connecting leaves this page for a moment.'; render(); return; }
+  const stateToken = newId() + newId();
+  sessionStorage.setItem(STRAVA_STATE_KEY, stateToken);
+  location.href = 'https://www.strava.com/oauth/authorize?' + new URLSearchParams({
+    client_id: strava.clientId, redirect_uri: stravaRedirect(), response_type: 'code',
+    approval_prompt: 'auto', scope: 'activity:write', state: stateToken,
+  });
+}
+
+function disconnectStrava() {
+  strava.refreshToken = null;
+  strava.accessToken = null;
+  strava.expiresAt = 0;
+  strava.athlete = '';
+  saveStrava();
+  renderSettings();
+}
+
+// Runs on page load. Strava sends the browser back here with ?state=...&code=...
+async function finishStravaConnect() {
+  const q = new URLSearchParams(location.search);
+  if (!q.has('state') || !(q.has('code') || q.has('error'))) return;
+  history.replaceState(null, '', location.pathname);
+  const expected = sessionStorage.getItem(STRAVA_STATE_KEY);
+  sessionStorage.removeItem(STRAVA_STATE_KEY);
+  showView('settings');
+  try {
+    if (!expected || q.get('state') !== expected) throw new Error('The reply from Strava did not match this browser session. Try connecting again.');
+    if (q.has('error')) throw new Error('Strava access was not granted (' + q.get('error') + ').');
+    if (!(q.get('scope') || '').split(',').includes('activity:write')) throw new Error('The upload permission was not ticked on the Strava page. Connect again and leave it ticked.');
+    await stravaToken({ grant_type: 'authorization_code', code: q.get('code') });
+    log('Strava connected' + (strava.athlete ? ' as ' + strava.athlete : ''));
+  } catch (err) {
+    state.alert = 'Strava connection failed: ' + err.message;
+    log(state.alert, 'err');
+  }
+  renderSettings();
+  render();
+}
+
+function stravaSettings() {
+  const connected = !!strava.refreshToken;
+  const field = (id, label, key, type) => [
+    el('label', { class: 'field', for: id, text: label }),
+    el('input', {
+      id, type, class: 'wide', value: strava[key], autocomplete: 'off', spellcheck: 'false',
+      onchange: (e) => { strava[key] = e.target.value.trim(); saveStrava(); },
+    }),
+  ];
+  const local = location.protocol === 'file:';
+  return el('div', null,
+    el('h3', { text: 'Strava' }),
+    el('div', { class: 'note', text: 'One-time setup: create a personal API application at strava.com/settings/api and set its Authorization Callback Domain to "' +
+      (location.hostname || 'localhost') + '". Then paste its Client ID and Client Secret here. They are stored only in this browser.' }),
+    local ? el('div', { class: 'note', text: 'This page was opened as a file. Strava can only send you back to a web address, so open the app from localhost to connect.' }) : null,
+    ...field('strava-id', 'Client ID', 'clientId', 'text'),
+    ...field('strava-secret', 'Client Secret', 'clientSecret', 'password'),
+    el('div', { class: 'row' },
+      el('span', { class: 'note', text: connected ? 'Connected' + (strava.athlete ? ' as ' + strava.athlete : '') + '.' : 'Not connected.' }),
+      el('span', { class: 'spacer' }),
+      connected ? el('button', { text: 'Disconnect', onclick: disconnectStrava }) : null,
+      el('button', { class: connected ? '' : 'primary', text: connected ? 'Connect again' : 'Connect to Strava', disabled: local, onclick: connectStrava })),
+    connected ? el('div', { class: 'note', text: 'Disconnect removes the tokens from this browser. To withdraw access completely, also remove the app under Settings, My Apps on Strava.' }) : null);
+}
+
+function setUpload(rideId, patch) {
+  upload = Object.assign({ rideId, busy: false, text: '', error: false }, patch);
+  const node = $('strava-status');
+  if (node && shownRideId === rideId) {
+    node.textContent = upload.text;
+    node.classList.toggle('err', upload.error);
+    $('btn-upload').disabled = upload.busy;
+  }
+}
+
+async function uploadRide(ride, name, description) {
+  if (upload.busy) return;
+  if (ride.strava && !confirm('This ride was already uploaded to Strava on ' + fmtDate(ride.strava.at) + '. Upload it again?')) return;
+  setUpload(ride.id, { busy: true, text: 'Uploading to Strava.' });
+  try {
+    const auth = { Authorization: 'Bearer ' + await stravaAccess() };
+    const form = new FormData();
+    form.append('file', new Blob([buildTcx(ride)], { type: 'application/xml' }), tcxFileName(ride));
+    form.append('data_type', 'tcx');
+    form.append('name', name);
+    form.append('description', description);
+    form.append('sport_type', 'VirtualRide');
+    form.append('trainer', '1');
+    form.append('external_id', 'erg-' + ride.id);
+    let data = await stravaFetch('https://www.strava.com/api/v3/uploads', { method: 'POST', headers: auth, body: form });
+    const uploadId = data.id_str || String(data.id);
+    ride.strava = { uploadId, at: Date.now() };
+    saveRides();
+
+    for (let i = 0; i < 45 && !data.activity_id && !data.error; i++) {
+      setUpload(ride.id, { busy: true, text: 'Strava is processing the ride.' });
+      await sleep(2000);
+      data = await stravaFetch('https://www.strava.com/api/v3/uploads/' + uploadId, { headers: auth });
+    }
+    if (data.error) {
+      delete ride.strava;
+      saveRides();
+      throw new Error(data.error);
+    }
+    if (!data.activity_id) throw new Error('Strava is still processing the ride. Look for it on Strava in a few minutes.');
+    ride.strava.activityId = String(data.activity_id);
+    saveRides();
+    log('Uploaded to Strava: activity ' + ride.strava.activityId);
+    setUpload(ride.id, {});
+    if (shownRideId === ride.id && !$('view-summary').hidden) renderSummary();
+  } catch (err) {
+    log('Strava upload failed: ' + err.message, 'err');
+    setUpload(ride.id, { text: 'Upload failed: ' + err.message, error: true });
+  }
+}
+
+function stravaPanel(ride) {
+  if (!ride.samples.length) return el('div', { class: 'note', text: 'This ride has no samples left to upload.' });
+  const draft = uploadDrafts[ride.id] || (uploadDrafts[ride.id] = {});
+  const day = new Date(ride.startedAt).toLocaleDateString([], { dateStyle: 'medium' });
+  const name = el('input', {
+    id: 'strava-name', type: 'text', class: 'wide', maxlength: 120, value: draft.name != null ? draft.name : ride.name + ', ' + day,
+    oninput: (e) => { draft.name = e.target.value; },
+  });
+  const description = el('textarea', { id: 'strava-description', oninput: (e) => { draft.description = e.target.value; } });
+  description.value = draft.description != null ? draft.description : rideNotes(ride).split('\n').slice(1).join('\n');
+  const mine = upload.rideId === ride.id;
+  const done = ride.strava && ride.strava.activityId;
+  return el('div', null,
+    done ? el('div', { class: 'note' }, 'Uploaded on ' + fmtDate(ride.strava.at) + '. ',
+      el('a', { href: 'https://www.strava.com/activities/' + encodeURIComponent(ride.strava.activityId), target: '_blank', rel: 'noopener', text: 'View the activity on Strava' })) : null,
+    el('label', { class: 'field', for: 'strava-name', text: 'Activity name' }), name,
+    el('label', { class: 'field', for: 'strava-description', text: 'Description. Lactate readings are filled in for you.' }), description,
+    el('div', { class: 'row' },
+      el('span', { id: 'strava-status', class: 'note' + (mine && upload.error ? ' err' : ''), text: mine ? upload.text : (strava.refreshToken ? '' : 'Connect Strava in Settings to upload from here.') }),
+      el('span', { class: 'spacer' }),
+      el('button', {
+        id: 'btn-upload', class: 'primary', text: done ? 'Upload again' : 'Upload to Strava',
+        disabled: !strava.refreshToken || upload.busy,
+        onclick: () => uploadRide(ride, name.value.trim() || ride.name, description.value),
+      })));
 }
 
 // ---------------------------------------------------------------- settings
@@ -1817,7 +2021,8 @@ function renderSettings() {
     el('div', { class: 'note', text: near
       ? 'Most recent lactate reading within 5 bpm of the ceiling: ' + near.mmol + ' mmol/L at ' + Math.round(near.hr) + ' bpm on ' + fmtDate(near.t) + '. Aim for under about 1.5 mmol/L at the ceiling.'
       : 'No lactate reading within 5 bpm of the ceiling yet. Aim for under about 1.5 mmol/L at the ceiling.' }),
-    el('div', { class: 'note', text: 'The cap works only while a ride is being recorded and a heart rate strap is connected.' }));
+    el('div', { class: 'note', text: 'The cap works only while a ride is being recorded and a heart rate strap is connected.' }),
+    stravaSettings());
 }
 
 // ------------------------------------------------------------------ render
@@ -1974,6 +2179,7 @@ if (!('bluetooth' in navigator)) {
 
 renderConn();
 render();
+finishStravaConnect();
 if (new URLSearchParams(location.search).has('sim')) toggleSim();
 </script>
 </body>
