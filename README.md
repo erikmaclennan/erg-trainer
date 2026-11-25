@@ -4,7 +4,8 @@ A single-page web app that runs steady ERG workouts on a Wahoo KICKR Core from C
 
 ## Status
 
-M1 prototype: connect trainer and heart rate strap, live display, fixed target power, simulator mode.
+- M1 prototype: connect trainer and heart rate strap, live display, fixed target power, simulator mode.
+- M2 workouts: builder with presets saved in the browser, run controls (start, pause, skip, end), ramps, manual offset, auto-pause.
 
 ## Run
 

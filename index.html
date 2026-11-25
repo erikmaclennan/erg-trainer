@@ -6,6 +6,7 @@
 <title>ERG Trainer</title>
 <style>
   :root {
+    color-scheme: dark;
     --bg: #0a0c0f;
     --panel: #12161b;
     --line: #232a33;
@@ -28,7 +29,7 @@
     flex-direction: column;
     min-height: 100vh;
   }
-  button, input { font: inherit; color: inherit; }
+  button, input, select { font: inherit; color: inherit; }
   button {
     background: var(--panel);
     border: 1px solid var(--line);
@@ -98,7 +99,7 @@
   }
   .tile .label { font-size: 18px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
   .tile .value {
-    font-size: clamp(64px, 15vw, 220px);
+    font-size: clamp(56px, min(15vw, 20vh), 220px);
     line-height: 1;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
@@ -142,6 +143,49 @@
   }
   #log .err { color: var(--bad); }
 
+  body.has-run .tile .value { font-size: clamp(52px, min(13vw, 14vh), 200px); }
+
+  nav { display: flex; gap: 4px; }
+  nav button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  #view-ride { flex: 1 0 auto; display: flex; flex-direction: column; }
+
+  #strip { margin: 12px 16px 0; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 20px; }
+  .strip-row { display: flex; flex-wrap: wrap; gap: 8px 32px; align-items: flex-end; }
+  .strip-row .grow { flex: 1; min-width: 220px; }
+  .strip-row .label { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  .strip-row .big { font-size: clamp(26px, 4vw, 48px); font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .strip-row .sub { font-size: 16px; color: var(--muted); min-height: 1.3em; }
+  #w-status { color: var(--warn); font-weight: 600; }
+  svg.profile { display: block; width: 100%; height: 56px; margin-top: 10px; }
+  svg.profile polygon { fill: var(--accent); fill-opacity: 0.6; stroke: var(--panel); stroke-width: 2; vector-effect: non-scaling-stroke; }
+  svg.profile .done { fill: var(--panel); fill-opacity: 0.6; }
+  svg.profile .mark { stroke: var(--text); stroke-width: 2; vector-effect: non-scaling-stroke; }
+  #offset { min-width: 70px; text-align: center; font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  #offset.on { color: var(--accent); }
+
+  #view-workouts { flex: 1; padding: 16px; max-width: 920px; width: 100%; margin: 0 auto; }
+  .pane-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .pane-head h2 { margin: 0; font-size: 22px; flex: 1; }
+  .wk { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; }
+  .wk-head { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: baseline; }
+  .wk-name { font-size: 18px; font-weight: 600; flex: 1; overflow-wrap: anywhere; }
+  .wk-dur { color: var(--muted); font-size: 14px; }
+  .wk-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .empty { color: var(--muted); padding: 24px 0; }
+  #wk-editor input, #wk-editor select {
+    background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+  }
+  #ed-name { width: 100%; font-size: 18px; margin-bottom: 14px; }
+  .ed-scroll { overflow-x: auto; }
+  #ed-rows { display: grid; grid-template-columns: auto auto repeat(4, minmax(64px, 90px)) auto; gap: 8px; align-items: center; min-width: 560px; }
+  #ed-rows .h { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+  #ed-rows input { width: 100%; font-variant-numeric: tabular-nums; }
+  #ed-rows .n { color: var(--muted); font-variant-numeric: tabular-nums; }
+  #ed-rows .ops { display: flex; gap: 4px; }
+  #ed-rows .ops button { padding: 8px 10px; }
+  .ed-foot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 14px; }
+  #ed-total { color: var(--muted); }
+
   @media (max-width: 640px) {
     main { grid-template-columns: 1fr; }
   }
@@ -150,6 +194,10 @@
 <body>
 
 <header>
+  <nav>
+    <button id="nav-ride" aria-pressed="true">Ride</button>
+    <button id="nav-workouts" aria-pressed="false">Workouts</button>
+  </nav>
   <div class="device">
     <button id="btn-trainer">Connect trainer</button>
     <span class="pill" id="pill-trainer" data-st="off"><span class="dot"></span><span class="txt">Trainer: not connected</span></span>
@@ -159,14 +207,30 @@
     <span class="pill" id="pill-hr" data-st="off"><span class="dot"></span><span class="txt">Strap: not connected</span></span>
   </div>
   <button id="btn-sim">Start simulator</button>
+  <button id="btn-coast" hidden>Sim: stop pedalling</button>
   <span class="spacer"></span>
   <span class="pill">Ride time</span>
   <span id="clock">0:00:00</span>
   <button id="btn-reset" title="Reset ride time">Reset</button>
 </header>
 
+<div id="view-ride">
 <div id="notice" hidden></div>
 <div id="alert" role="alert" hidden></div>
+
+<section id="strip" hidden>
+  <div class="strip-row">
+    <div class="grow">
+      <div class="label">Block <span id="w-pos"></span> <span id="w-name"></span></div>
+      <div class="big" id="w-block"></div>
+      <div class="sub"><span id="w-status"></span> <span id="w-next"></span></div>
+    </div>
+    <div><div class="label">Block left</div><div class="big" id="w-block-left"></div></div>
+    <div><div class="label">Elapsed</div><div class="big" id="w-elapsed"></div></div>
+    <div><div class="label">Remaining</div><div class="big" id="w-left"></div></div>
+  </div>
+  <svg class="profile" id="w-profile" viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true"></svg>
+</section>
 
 <main>
   <section class="tile" id="tile-target">
@@ -191,15 +255,55 @@
   </section>
 </main>
 
-<footer>
+<footer id="foot-free">
   <label for="target-input">Target power (W)</label>
   <button class="step" id="btn-minus" aria-label="Lower target by 5 watts">-5</button>
   <input id="target-input" type="number" inputmode="numeric" min="50" max="400" step="5" value="100">
   <button class="step" id="btn-plus" aria-label="Raise target by 5 watts">+5</button>
   <button class="primary" id="btn-set">Set target</button>
   <button id="btn-easy">Easy (80 W)</button>
-  <span class="hint">Up / Down arrows: 5 W. Range 50 to 400 W.</span>
+  <span class="hint">Free ride. Up / Down arrows: 5 W. Range 50 to 400 W.</span>
 </footer>
+
+<footer id="foot-run" hidden>
+  <button class="primary" id="btn-go">Start</button>
+  <button id="btn-skip">Skip block</button>
+  <button id="btn-end">End workout</button>
+  <button id="btn-close">Close workout</button>
+  <span class="spacer"></span>
+  <label>Offset</label>
+  <button class="step" id="btn-off-minus" aria-label="Lower all remaining targets by 5 watts">-5</button>
+  <span id="offset">0 W</span>
+  <button class="step" id="btn-off-plus" aria-label="Raise all remaining targets by 5 watts">+5</button>
+  <button id="btn-off-reset">Reset offset</button>
+  <span class="hint">Space: start or pause. Up / Down: 5 W. 0: reset offset.</span>
+</footer>
+</div>
+
+<section id="view-workouts" hidden>
+  <div id="wk-list-pane">
+    <div class="pane-head">
+      <h2>Workouts</h2>
+      <button id="btn-presets">Restore presets</button>
+      <button class="primary" id="btn-new">New workout</button>
+    </div>
+    <div id="wk-list"></div>
+  </div>
+  <div id="wk-editor" hidden>
+    <div class="pane-head"><h2>Edit workout</h2></div>
+    <input id="ed-name" type="text" maxlength="80" aria-label="Workout name">
+    <div class="ed-scroll"><div id="ed-rows"></div></div>
+    <svg class="profile" id="ed-profile" viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true"></svg>
+    <div class="ed-foot">
+      <button id="btn-add-steady">Add steady block</button>
+      <button id="btn-add-ramp">Add ramp block</button>
+      <span id="ed-total"></span>
+      <span class="spacer"></span>
+      <button id="btn-ed-cancel">Cancel</button>
+      <button class="primary" id="btn-ed-save">Save workout</button>
+    </div>
+  </div>
+</section>
 
 <details>
   <summary>Event log</summary>
@@ -217,6 +321,8 @@ const EASY_W = 80;
 const STEP_W = 5;
 const SMOOTH_MS = 3000;
 const STALE_MS = 4000;
+const AUTO_PAUSE_MS = 5000;
+const STORE_KEY = 'erg.workouts.v1';
 
 const UUID = {
   ftms: 0x1826, indoorBikeData: 0x2ad2, controlPoint: 0x2ad9, machineStatus: 0x2ada,
@@ -247,6 +353,7 @@ const state = {
 let trainer = null;    // BleTrainer or SimTrainer
 let strap = null;      // BleHeartRate
 let sim = null;
+let run = null;        // workout in progress, see the run engine below
 
 const $ = (id) => document.getElementById(id);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -562,6 +669,7 @@ class SimTrainer {
   constructor() {
     this.canControl = true;
     this.goal = null;
+    this.coast = false;
     this.watts = 0;
     this.bpm = 68;
     hub.conn('trainer', 'sim', 'Simulated trainer');
@@ -570,12 +678,13 @@ class SimTrainer {
     log('Simulator started');
   }
   tick() {
-    const goal = this.goal == null ? 120 : this.goal;
+    const goal = this.coast ? 0 : (this.goal == null ? 120 : this.goal);
     this.watts += (goal - this.watts) * 0.5;
-    const w = Math.max(0, Math.round(this.watts + (Math.random() - 0.5) * 8));
+    const stopped = this.coast && this.watts < 5;
+    const w = stopped ? 0 : Math.max(0, Math.round(this.watts + (Math.random() - 0.5) * 8));
     this.bpm += ((62 + w * 0.41) - this.bpm) / 40;
     hub.power(w);
-    hub.cadence(88 + Math.round((Math.random() - 0.5) * 4));
+    hub.cadence(stopped ? 0 : 88 + Math.round((Math.random() - 0.5) * 4));
     hub.hr(Math.round(this.bpm));
   }
   setTarget(w) {
@@ -676,6 +785,417 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && (trainer || strap)) keepAwake();
 });
 
+// ---------------------------------------------------------------- workouts
+
+// A workout is { id, name, blocks }. A block is either
+// { type: 'steady', watts, secs } or { type: 'ramp', from, to, secs }.
+
+const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const ramp = (from, to, mins) => ({ type: 'ramp', from, to, secs: mins * 60 });
+const steady = (watts, mins) => ({ type: 'steady', watts, secs: mins * 60 });
+
+function presets() {
+  return [
+    { id: 'preset-z2-60', name: 'Zone 2, 60 min', blocks: [ramp(100, 150, 10), steady(150, 45), ramp(150, 100, 5)] },
+    { id: 'preset-z2-90', name: 'Zone 2, 90 min', blocks: [ramp(100, 150, 10), steady(150, 75), ramp(150, 100, 5)] },
+    { id: 'preset-recovery-30', name: 'Recovery spin, 30 min', blocks: [ramp(80, 110, 5), steady(110, 20), ramp(110, 80, 5)] },
+  ];
+}
+
+function cleanWatts(v) {
+  v = Number(v);
+  return Number.isFinite(v) ? Math.round(clamp(v, MIN_W, MAX_W)) : 100;
+}
+
+function cleanBlock(b) {
+  const secs = Number.isFinite(Number(b.secs)) ? Math.max(5, Math.round(Number(b.secs))) : 60;
+  if (b.type === 'ramp') return { type: 'ramp', from: cleanWatts(b.from), to: cleanWatts(b.to), secs };
+  return { type: 'steady', watts: cleanWatts(b.watts), secs };
+}
+
+function cleanWorkout(w) {
+  return {
+    id: String(w.id || newId()),
+    name: String(w.name || '').trim().slice(0, 80) || 'Untitled workout',
+    blocks: (Array.isArray(w.blocks) ? w.blocks : []).map(cleanBlock),
+  };
+}
+
+function loadWorkouts() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (raw) {
+      const list = JSON.parse(raw);
+      if (Array.isArray(list)) return list.map(cleanWorkout);
+    }
+  } catch (err) {
+    log('Saved workouts could not be read: ' + err.message, 'err');
+  }
+  return presets();
+}
+
+function saveWorkouts() {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(workouts));
+  } catch (err) {
+    state.alert = 'Workouts could not be saved in this browser: ' + err.message;
+    log(state.alert, 'err');
+  }
+}
+
+let workouts = loadWorkouts();
+let draft = null;      // workout being edited in the builder
+
+const totalSecs = (w) => w.blocks.reduce((sum, b) => sum + b.secs, 0);
+const startWatts = (b) => (b.type === 'ramp' ? b.from : b.watts);
+const endWatts = (b) => (b.type === 'ramp' ? b.to : b.watts);
+
+function blockAt(w, ms) {
+  let start = 0;
+  for (let i = 0; i < w.blocks.length; i++) {
+    const len = w.blocks[i].secs * 1000;
+    if (ms < start + len) return { i, b: w.blocks[i], into: ms - start, start };
+    start += len;
+  }
+  return null;
+}
+
+function plannedWatts(b, intoMs) {
+  if (b.type !== 'ramp') return b.watts;
+  return b.from + (b.to - b.from) * clamp(intoMs / (b.secs * 1000), 0, 1);
+}
+
+function blockName(w, i) {
+  const b = w.blocks[i];
+  if (b.type !== 'ramp') return 'Steady';
+  if (i === 0 && b.to > b.from) return 'Warm up';
+  if (i === w.blocks.length - 1 && b.to < b.from) return 'Cool down';
+  return 'Ramp';
+}
+
+function describeBlock(w, i) {
+  const b = w.blocks[i];
+  const watts = b.type === 'ramp' ? b.from + ' to ' + b.to + ' W' : b.watts + ' W';
+  return blockName(w, i) + ' ' + watts;
+}
+
+function fmtShort(ms) {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  const pad = (v) => String(v).padStart(2, '0');
+  const h = Math.floor(s / 3600);
+  return (h ? h + ':' + pad(Math.floor(s / 60) % 60) : Math.floor(s / 60)) + ':' + pad(s % 60);
+}
+
+// Inner SVG for a workout profile in a 1000 x 100 box. All inputs are numbers.
+function profileMarkup(w, progressMs) {
+  const total = totalSecs(w) || 1;
+  const top = Math.max(100, ...w.blocks.map((b) => Math.max(startWatts(b), endWatts(b)))) * 1.1;
+  const y = (v) => (100 - v / top * 100).toFixed(1);
+  let t = 0;
+  let out = '';
+  for (const b of w.blocks) {
+    const x0 = (t / total * 1000).toFixed(1);
+    t += b.secs;
+    const x1 = (t / total * 1000).toFixed(1);
+    out += '<polygon points="' + x0 + ',100 ' + x0 + ',' + y(startWatts(b)) + ' ' + x1 + ',' + y(endWatts(b)) + ' ' + x1 + ',100"/>';
+  }
+  if (progressMs != null) {
+    const x = (clamp(progressMs / 1000 / total, 0, 1) * 1000).toFixed(1);
+    out += '<rect class="done" x="0" y="0" width="' + x + '" height="100"/>';
+    out += '<line class="mark" x1="' + x + '" x2="' + x + '" y1="0" y2="100"/>';
+  }
+  return out;
+}
+
+// ------------------------------------------------------------------ builder
+
+function el(tag, props, ...kids) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (k === 'text') node.textContent = v;
+    else if (k === 'class') node.className = v;
+    else if (k.startsWith('on')) node.addEventListener(k.slice(2), v);
+    else if (v === true) node.setAttribute(k, '');
+    else if (v !== false && v != null) node.setAttribute(k, v);
+  }
+  node.append(...kids.filter((k) => k != null));
+  return node;
+}
+
+function profileSvg(w) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'profile');
+  svg.setAttribute('viewBox', '0 0 1000 100');
+  svg.setAttribute('preserveAspectRatio', 'none');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.innerHTML = profileMarkup(w);
+  return svg;
+}
+
+function renderWorkouts() {
+  $('wk-list-pane').hidden = !!draft;
+  $('wk-editor').hidden = !draft;
+  if (draft) { renderEditor(); return; }
+  const list = $('wk-list');
+  list.replaceChildren();
+  if (!workouts.length) list.append(el('div', { class: 'empty', text: 'No workouts saved. Make a new one or restore the presets.' }));
+  for (const w of workouts) {
+    const parts = w.blocks.map((b, i) => describeBlock(w, i)).join(', ');
+    list.append(el('div', { class: 'wk' },
+      el('div', { class: 'wk-head' },
+        el('div', { class: 'wk-name', text: w.name }),
+        el('div', { class: 'wk-dur', text: fmtShort(totalSecs(w) * 1000) + ' total' })),
+      el('div', { class: 'wk-dur', text: parts }),
+      profileSvg(w),
+      el('div', { class: 'wk-actions' },
+        el('button', { class: 'primary', text: 'Ride', disabled: !w.blocks.length, onclick: () => loadRun(w) }),
+        el('button', { text: 'Edit', onclick: () => { draft = JSON.parse(JSON.stringify(w)); renderWorkouts(); } }),
+        el('button', { text: 'Duplicate', onclick: () => duplicateWorkout(w) }),
+        el('button', { text: 'Delete', onclick: () => deleteWorkout(w) }))));
+  }
+}
+
+function duplicateWorkout(w) {
+  const copy = cleanWorkout(Object.assign({}, w, { id: newId(), name: w.name + ' copy' }));
+  workouts.splice(workouts.indexOf(w) + 1, 0, copy);
+  saveWorkouts();
+  renderWorkouts();
+}
+
+function deleteWorkout(w) {
+  if (!confirm('Delete "' + w.name + '"? This cannot be undone.')) return;
+  workouts = workouts.filter((x) => x !== w);
+  saveWorkouts();
+  renderWorkouts();
+}
+
+function restorePresets() {
+  const have = new Set(workouts.map((w) => w.id));
+  const missing = presets().filter((p) => !have.has(p.id));
+  workouts = workouts.concat(missing);
+  saveWorkouts();
+  renderWorkouts();
+}
+
+function renderEditor() {
+  $('ed-name').value = draft.name;
+  const rows = $('ed-rows');
+  rows.replaceChildren();
+  for (const h of ['', 'Type', 'Watts', 'End watts', 'Min', 'Sec', '']) rows.append(el('div', { class: 'h', text: h }));
+
+  draft.blocks.forEach((b, i) => {
+    const n = i + 1;
+    const field = (value, label, onValue, max) => el('input', {
+      type: 'number', inputmode: 'numeric', min: 0, max, value, 'aria-label': 'Block ' + n + ' ' + label,
+      oninput: (e) => { onValue(e.target.value === '' ? NaN : Number(e.target.value)); refreshDraft(); },
+    });
+    const isRamp = b.type === 'ramp';
+    const mins = field(Math.floor(b.secs / 60), 'minutes', () => setSecs(), 600);
+    const secs = field(b.secs % 60, 'seconds', () => setSecs(), 59);
+    const setSecs = () => { b.secs = (Number(mins.value) || 0) * 60 + (Number(secs.value) || 0); };
+
+    rows.append(
+      el('div', { class: 'n', text: n }),
+      el('select', {
+        'aria-label': 'Block ' + n + ' type',
+        onchange: (e) => {
+          draft.blocks[i] = e.target.value === 'ramp'
+            ? { type: 'ramp', from: startWatts(b), to: endWatts(b), secs: b.secs }
+            : { type: 'steady', watts: endWatts(b), secs: b.secs };
+          renderEditor();
+        },
+      },
+        el('option', { value: 'steady', text: 'Steady', selected: !isRamp }),
+        el('option', { value: 'ramp', text: 'Ramp', selected: isRamp })),
+      field(startWatts(b), isRamp ? 'start watts' : 'watts', (v) => { if (isRamp) b.from = v; else b.watts = v; }, MAX_W),
+      isRamp ? field(b.to, 'end watts', (v) => { b.to = v; }, MAX_W) : el('div'),
+      mins,
+      secs,
+      el('div', { class: 'ops' },
+        el('button', { text: 'Up', disabled: i === 0, 'aria-label': 'Move block ' + n + ' up', onclick: () => moveBlock(i, -1) }),
+        el('button', { text: 'Down', disabled: i === draft.blocks.length - 1, 'aria-label': 'Move block ' + n + ' down', onclick: () => moveBlock(i, 1) }),
+        el('button', { text: 'Delete', 'aria-label': 'Delete block ' + n, onclick: () => { draft.blocks.splice(i, 1); renderEditor(); } })));
+  });
+  refreshDraft();
+}
+
+function moveBlock(i, dir) {
+  const [b] = draft.blocks.splice(i, 1);
+  draft.blocks.splice(i + dir, 0, b);
+  renderEditor();
+}
+
+function addBlock(type) {
+  const last = draft.blocks[draft.blocks.length - 1];
+  const w = last ? endWatts(cleanBlock(last)) : 100;
+  draft.blocks.push(type === 'ramp' ? { type: 'ramp', from: w, to: w, secs: 300 } : { type: 'steady', watts: w, secs: 600 });
+  renderEditor();
+}
+
+function refreshDraft() {
+  const preview = cleanWorkout(draft);
+  $('ed-profile').innerHTML = profileMarkup(preview);
+  $('ed-total').textContent = 'Total ' + fmtShort(totalSecs(preview) * 1000);
+  $('btn-ed-save').disabled = !preview.blocks.length;
+}
+
+function saveDraft() {
+  draft.name = $('ed-name').value;
+  const w = cleanWorkout(draft);
+  const at = workouts.findIndex((x) => x.id === w.id);
+  if (at >= 0) workouts[at] = w; else workouts.push(w);
+  draft = null;
+  saveWorkouts();
+  renderWorkouts();
+}
+
+function showView(name) {
+  $('view-ride').hidden = name !== 'ride';
+  $('view-workouts').hidden = name !== 'workouts';
+  $('nav-ride').setAttribute('aria-pressed', String(name === 'ride'));
+  $('nav-workouts').setAttribute('aria-pressed', String(name === 'workouts'));
+  if (name === 'workouts') renderWorkouts();
+}
+
+// --------------------------------------------------------------- run engine
+
+// run.status is one of: ready, running, paused, autopaused, done.
+
+function loadRun(w) {
+  if (run && run.status !== 'ready' && run.status !== 'done' &&
+      !confirm('A workout is in progress. Replace it with "' + w.name + '"?')) return;
+  run = { workout: cleanWorkout(w), status: 'ready', elapsedMs: 0, offset: 0, blockIndex: -1, lastSendAt: 0, zeroSince: null };
+  log('Loaded workout: ' + run.workout.name);
+  showView('ride');
+  render();
+}
+
+function sendRunTarget(force) {
+  const pos = blockAt(run.workout, run.elapsedMs);
+  if (!pos) return;
+  if (pos.i !== run.blockIndex) {
+    run.blockIndex = pos.i;
+    force = true;
+    log('Block ' + (pos.i + 1) + ': ' + describeBlock(run.workout, pos.i));
+  }
+  const now = performance.now();
+  const w = Math.round(clamp(plannedWatts(pos.b, pos.into) + run.offset, MIN_W, MAX_W));
+  // Ramps step in whole watts, sent at most once per second.
+  if (force || (w !== state.target && now - run.lastSendAt >= 1000)) {
+    run.lastSendAt = now;
+    applyTarget(w);
+  }
+}
+
+function setRunning(why) {
+  run.status = 'running';
+  run.zeroSince = null;
+  log(why);
+  keepAwake();
+  sendRunTarget(true);
+}
+
+function holdRun(status, why) {
+  run.status = status;
+  log(why);
+  applyTarget(EASY_W);
+}
+
+function goAction() {
+  if (!run) return;
+  if (run.status === 'ready') setRunning('Workout started');
+  else if (run.status === 'running') holdRun('paused', 'Workout paused');
+  else if (run.status === 'paused' || run.status === 'autopaused') setRunning('Workout resumed');
+  else if (run.status === 'done') { run.elapsedMs = 0; run.blockIndex = -1; setRunning('Workout restarted'); }
+}
+
+function skipBlock() {
+  if (!run || run.status === 'done') return;
+  const pos = blockAt(run.workout, run.elapsedMs);
+  if (!pos) return;
+  run.elapsedMs = pos.start + pos.b.secs * 1000;
+  if (run.elapsedMs >= totalSecs(run.workout) * 1000) holdRun('done', 'Workout complete');
+  else if (run.status === 'running') sendRunTarget(true);
+  render();
+}
+
+function endRun() {
+  if (run && run.status !== 'done' && run.status !== 'ready') holdRun('done', 'Workout ended early');
+}
+
+function closeRun() {
+  run = null;
+  render();
+}
+
+function adjust(delta) {
+  if (!run) { nudge(delta); return; }
+  run.offset = delta === 0 ? 0 : run.offset + delta;
+  if (run.status === 'running') sendRunTarget(true);
+  render();
+}
+
+function runTick(now, dt) {
+  if (!run) return;
+  const last = state.samples[state.samples.length - 1];
+  const powerFresh = !!last && now - last.t < STALE_MS;
+  const cadFresh = now - state.cadenceAt < STALE_MS;
+  const moving = (powerFresh && last.w > 0) || (cadFresh && state.cadence > 0);
+
+  if (run.status === 'autopaused') {
+    if (moving) setRunning('Pedalling again. Workout resumed.');
+    return;
+  }
+  if (run.status !== 'running') return;
+
+  // Auto-pause needs live readings of zero. A dropped trainer does not pause the clock.
+  if (powerFresh && !moving) {
+    if (run.zeroSince == null) run.zeroSince = now;
+    if (now - run.zeroSince > AUTO_PAUSE_MS) { holdRun('autopaused', 'No pedalling for 5 seconds. Workout auto-paused.'); return; }
+  } else {
+    run.zeroSince = null;
+  }
+
+  run.elapsedMs += dt;
+  if (run.elapsedMs >= totalSecs(run.workout) * 1000) holdRun('done', 'Workout complete');
+  else sendRunTarget(false);
+}
+
+function renderRun() {
+  document.body.classList.toggle('has-run', !!run);
+  $('strip').hidden = !run;
+  $('foot-run').hidden = !run;
+  $('foot-free').hidden = !!run;
+  if (!run) return;
+
+  const w = run.workout;
+  const total = totalSecs(w) * 1000;
+  const done = run.status === 'done';
+  const pos = blockAt(w, Math.min(run.elapsedMs, total - 1));
+  const next = pos.i + 1 < w.blocks.length ? 'Next: ' + describeBlock(w, pos.i + 1) + ', ' + fmtShort(w.blocks[pos.i + 1].secs * 1000) : 'Last block';
+
+  $('w-pos').textContent = (pos.i + 1) + ' of ' + w.blocks.length + ',';
+  $('w-name').textContent = w.name;
+  $('w-block').textContent = done ? 'Workout finished' : describeBlock(w, pos.i);
+  $('w-status').textContent = {
+    ready: 'Ready. Press Start.', running: '', paused: 'Paused.',
+    autopaused: 'Auto-paused. Pedal to resume.', done: '',
+  }[run.status];
+  $('w-next').textContent = done ? '' : next;
+  $('w-block-left').textContent = done ? '0:00' : fmtShort(pos.b.secs * 1000 - pos.into);
+  $('w-elapsed').textContent = fmtShort(Math.floor(Math.min(run.elapsedMs, total) / 1000) * 1000);
+  $('w-left').textContent = fmtShort(total - Math.min(run.elapsedMs, total));
+  $('w-profile').innerHTML = profileMarkup(w, run.elapsedMs);
+
+  $('btn-go').textContent = { ready: 'Start', running: 'Pause', paused: 'Resume', autopaused: 'Resume', done: 'Restart' }[run.status];
+  $('btn-skip').disabled = done;
+  $('btn-end').hidden = done || run.status === 'ready';
+  $('btn-close').hidden = !(done || run.status === 'ready');
+  $('offset').textContent = (run.offset > 0 ? '+' : '') + run.offset + ' W';
+  $('offset').classList.toggle('on', run.offset !== 0);
+  $('btn-off-reset').disabled = run.offset === 0;
+}
+
 // ------------------------------------------------------------------ render
 
 function smoothedPower(now) {
@@ -722,6 +1242,7 @@ function render() {
   $('clock').textContent = fmtClock(state.rideMs);
   $('alert').hidden = !state.alert;
   $('alert').textContent = state.alert || '';
+  renderRun();
 }
 
 function renderConn() {
@@ -739,6 +1260,8 @@ function renderConn() {
   $('btn-trainer').disabled = !hasBt;
   $('btn-hr').disabled = !hasBt;
   $('btn-sim').textContent = sim ? 'Stop simulator' : 'Start simulator';
+  $('btn-coast').hidden = !sim;
+  $('btn-coast').textContent = sim && sim.coast ? 'Sim: start pedalling' : 'Sim: stop pedalling';
 }
 
 // Ride time counts only while the pedals are turning.
@@ -751,6 +1274,7 @@ setInterval(() => {
   const pedalling = (last && now - last.t < STALE_MS && last.w > 0) ||
                     (now - state.cadenceAt < STALE_MS && state.cadence > 0);
   if (pedalling && dt < 2000) state.rideMs += dt;
+  runTick(now, dt);
   render();
 }, 250);
 
@@ -767,10 +1291,35 @@ $('btn-easy').addEventListener('click', () => applyTarget(EASY_W));
 $('target-input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { applyTarget(Number(e.target.value)); e.target.blur(); }
 });
+$('nav-ride').addEventListener('click', () => showView('ride'));
+$('nav-workouts').addEventListener('click', () => showView('workouts'));
+$('btn-coast').addEventListener('click', () => { if (sim) { sim.coast = !sim.coast; renderConn(); } });
+$('btn-go').addEventListener('click', goAction);
+$('btn-skip').addEventListener('click', skipBlock);
+$('btn-end').addEventListener('click', endRun);
+$('btn-close').addEventListener('click', closeRun);
+$('btn-off-plus').addEventListener('click', () => adjust(STEP_W));
+$('btn-off-minus').addEventListener('click', () => adjust(-STEP_W));
+$('btn-off-reset').addEventListener('click', () => adjust(0));
+$('btn-new').addEventListener('click', () => {
+  draft = { id: newId(), name: 'New workout', blocks: [ramp(100, 150, 10), steady(150, 30), ramp(150, 100, 5)] };
+  renderWorkouts();
+});
+$('btn-presets').addEventListener('click', restorePresets);
+$('btn-add-steady').addEventListener('click', () => addBlock('steady'));
+$('btn-add-ramp').addEventListener('click', () => addBlock('ramp'));
+$('btn-ed-cancel').addEventListener('click', () => { draft = null; renderWorkouts(); });
+$('btn-ed-save').addEventListener('click', saveDraft);
+$('ed-name').addEventListener('input', (e) => { draft.name = e.target.value; });
+
 document.addEventListener('keydown', (e) => {
-  if (e.target instanceof HTMLInputElement || e.metaKey || e.ctrlKey || e.altKey) return;
-  if (e.key === 'ArrowUp') { nudge(STEP_W); e.preventDefault(); }
-  if (e.key === 'ArrowDown') { nudge(-STEP_W); e.preventDefault(); }
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.target instanceof Element && e.target.closest('input, select, button, summary')) return;
+  if ($('view-ride').hidden) return;
+  if (e.key === 'ArrowUp') { adjust(STEP_W); e.preventDefault(); }
+  if (e.key === 'ArrowDown') { adjust(-STEP_W); e.preventDefault(); }
+  if (e.key === '0' && run) adjust(0);
+  if (e.key === ' ' && run) { goAction(); e.preventDefault(); }
 });
 
 if (!('bluetooth' in navigator)) {
