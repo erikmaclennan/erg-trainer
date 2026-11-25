@@ -43,7 +43,7 @@
   button:hover { border-color: var(--muted); }
   button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   button:disabled { opacity: 0.4; cursor: not-allowed; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #111; font-weight: 600; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent, #111); font-weight: 600; }
 
   header {
     display: flex;
@@ -78,7 +78,7 @@
     border-radius: 8px;
     font-size: 18px;
   }
-  #alert { background: #3a1513; border: 1px solid var(--bad); }
+  #alert { background: color-mix(in srgb, var(--bad) 22%, var(--bg)); border: 1px solid var(--bad); }
   #notice { background: var(--panel); border: 1px solid var(--line); color: var(--muted); font-size: 15px; }
   [hidden] { display: none !important; }
 
@@ -236,6 +236,7 @@
   .page h3 { margin: 20px 0 8px; font-size: 16px; }
   .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
   .set { display: grid; grid-template-columns: 1fr 120px; gap: 10px 16px; align-items: center; max-width: 560px; }
+  .set input[type="color"] { padding: 2px; height: 38px; cursor: pointer; }
   .set input[type="checkbox"] { width: 22px; height: 22px; justify-self: start; }
   .set input, .set select { width: 100%; }
   .note { color: var(--muted); font-size: 14px; margin: 8px 0; }
@@ -502,8 +503,69 @@ const DEFAULTS = {
   capOn: true, ceiling: 138, capWindow: 30, capDelay: 60, capStep: 5, capMargin: 5, capHold: 180, capGrace: 300,
   minW: 50, maxW: 400, smoothSecs: 3,
   stopMmol: 4, testStart: 100, testStep: 20, testMins: 5, testCount: 6,
+  theme: 'dark', colors: null,
 };
 const settings = Object.assign({}, DEFAULTS, loadJson(SETTINGS_KEY, {}));
+
+// Colour themes. settings.colors holds any single colours the rider changed on top of the theme.
+const THEMES = {
+  dark: { label: 'Dark grey (default)', bg: '#0a0c0f', panel: '#12161b', line: '#232a33', text: '#f2f4f6', muted: '#8793a1', accent: '#ffb020' },
+  black: { label: 'True black', bg: '#000000', panel: '#000000', line: '#3d3d3d', text: '#ffffff', muted: '#a3a3a3', accent: '#ffb020' },
+  blue: { label: 'Deep blue', bg: '#04101f', panel: '#0a1b33', line: '#1e3658', text: '#f2f6fb', muted: '#8fa6c6', accent: '#ffb020' },
+  light: { label: 'Light', bg: '#f1f3f5', panel: '#ffffff', line: '#cdd3db', text: '#111418', muted: '#56616f', accent: '#b45f00',
+    ok: '#1a8f4c', warn: '#b45f00', bad: '#d92d20', sim: '#2563c9' },
+
+  // Editor and terminal palettes. Labels are lightened where the palette's own comment colour is too dim to read from the bike.
+  'solarized-dark': { group: 'Editor palettes', label: 'Solarized Dark', bg: '#002b36', panel: '#073642', line: '#1a4f5c', text: '#eee8d5', muted: '#93a1a1', accent: '#b58900',
+    ok: '#859900', warn: '#cb4b16', bad: '#dc322f', sim: '#268bd2' },
+  'solarized-light': { group: 'Editor palettes', label: 'Solarized Light', bg: '#fdf6e3', panel: '#eee8d5', line: '#d3cbb7', text: '#073642', muted: '#586e75', accent: '#cb4b16',
+    ok: '#859900', warn: '#b58900', bad: '#dc322f', sim: '#268bd2' },
+  'gruvbox-dark': { group: 'Editor palettes', label: 'Gruvbox Dark', bg: '#282828', panel: '#32302f', line: '#504945', text: '#ebdbb2', muted: '#a89984', accent: '#fabd2f',
+    ok: '#b8bb26', warn: '#fe8019', bad: '#fb4934', sim: '#83a598' },
+  'gruvbox-light': { group: 'Editor palettes', label: 'Gruvbox Light', bg: '#fbf1c7', panel: '#f2e5bc', line: '#d5c4a1', text: '#3c3836', muted: '#7c6f64', accent: '#af3a03',
+    ok: '#79740e', warn: '#b57614', bad: '#cc241d', sim: '#076678' },
+  dracula: { group: 'Editor palettes', label: 'Dracula', bg: '#282a36', panel: '#313442', line: '#44475a', text: '#f8f8f2', muted: '#9aa5ce', accent: '#bd93f9',
+    ok: '#50fa7b', warn: '#ffb86c', bad: '#ff5555', sim: '#8be9fd' },
+  nord: { group: 'Editor palettes', label: 'Nord', bg: '#2e3440', panel: '#3b4252', line: '#4c566a', text: '#eceff4', muted: '#b4bfd0', accent: '#88c0d0',
+    ok: '#a3be8c', warn: '#ebcb8b', bad: '#bf616a', sim: '#81a1c1' },
+  'tokyo-night': { group: 'Editor palettes', label: 'Tokyo Night', bg: '#1a1b26', panel: '#24283b', line: '#414868', text: '#c0caf5', muted: '#9aa5ce', accent: '#7aa2f7',
+    ok: '#9ece6a', warn: '#e0af68', bad: '#f7768e', sim: '#7dcfff' },
+  'catppuccin-mocha': { group: 'Editor palettes', label: 'Catppuccin Mocha', bg: '#181825', panel: '#1e1e2e', line: '#313244', text: '#cdd6f4', muted: '#a6adc8', accent: '#cba6f7',
+    ok: '#a6e3a1', warn: '#fab387', bad: '#f38ba8', sim: '#89b4fa' },
+  'one-dark': { group: 'Editor palettes', label: 'One Dark', bg: '#21252b', panel: '#282c34', line: '#3e4451', text: '#dcdfe4', muted: '#9299a6', accent: '#61afef',
+    ok: '#98c379', warn: '#e5c07b', bad: '#e06c75', sim: '#56b6c2' },
+  monokai: { group: 'Editor palettes', label: 'Monokai', bg: '#272822', panel: '#31322b', line: '#49483e', text: '#f8f8f2', muted: '#a59f85', accent: '#fd971f',
+    ok: '#a6e22e', warn: '#e6db74', bad: '#f92672', sim: '#66d9ef' },
+};
+const STATUS_COLORS = { ok: '#3ddc84', warn: '#ffb020', bad: '#ff5a52', sim: '#6aa9ff' };
+const THEME_KEYS = [
+  ['bg', 'Page background'], ['panel', 'Tile background'], ['line', 'Borders'],
+  ['text', 'Main text and digits'], ['muted', 'Labels'], ['accent', 'Accent and target power'],
+];
+
+function themeColors() {
+  const custom = settings.colors && typeof settings.colors === 'object' ? settings.colors : {};
+  const out = Object.assign({}, THEMES[settings.theme] || THEMES.dark);
+  for (const [key] of THEME_KEYS) if (/^#[0-9a-f]{6}$/i.test(custom[key] || '')) out[key] = custom[key];
+  return out;
+}
+
+function applyTheme() {
+  const c = themeColors();
+  const luminance = (hex) => {
+    const n = parseInt(hex.slice(1), 16);
+    const [r, g, b] = [n >> 16 & 255, n >> 8 & 255, n & 255].map((v) => (v / 255 <= 0.03928 ? v / 255 / 12.92 : Math.pow((v / 255 + 0.055) / 1.055, 2.4)));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const root = document.documentElement.style;
+  for (const [key] of THEME_KEYS) root.setProperty('--' + key, c[key]);
+  for (const key of Object.keys(STATUS_COLORS)) root.setProperty('--' + key, c[key] || STATUS_COLORS[key]);
+  root.setProperty('--on-accent', luminance(c.accent) > 0.3 ? '#111111' : '#ffffff');
+  root.setProperty('color-scheme', luminance(c.bg) > 0.4 ? 'light' : 'dark');
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', c.bg);
+}
+applyTheme();
 
 // The hub is the only way devices talk to the rest of the app.
 const hub = {
@@ -2459,7 +2521,36 @@ function setSetting(key, value) {
   renderSettings();
 }
 
+function appearanceSettings() {
+  const colors = themeColors();
+  const custom = settings.colors || {};
+  const grid = el('div', { class: 'set' },
+    el('label', { for: 'set-theme', text: 'Colour theme' }),
+    el('select', {
+      id: 'set-theme',
+      onchange: (e) => { settings.theme = e.target.value; settings.colors = null; saveJson(SETTINGS_KEY, settings); renderSettings(); },
+    }, ...['Built in', 'Editor palettes'].map((group) => el('optgroup', { label: group },
+      ...Object.entries(THEMES).filter(([, t]) => (t.group || 'Built in') === group)
+        .map(([key, t]) => el('option', { value: key, text: t.label, selected: key === settings.theme }))))));
+  for (const [key, label] of THEME_KEYS) {
+    grid.append(
+      el('label', { for: 'set-color-' + key, text: label + (custom[key] ? ' (changed)' : '') }),
+      el('input', {
+        id: 'set-color-' + key, type: 'color', value: colors[key],
+        oninput: (e) => { settings.colors = Object.assign({}, settings.colors, { [key]: e.target.value }); applyTheme(); },
+        onchange: () => { saveJson(SETTINGS_KEY, settings); renderSettings(); },
+      }));
+  }
+  return el('div', null,
+    el('h3', { text: 'Appearance' }),
+    el('div', { class: 'note', text: 'Pick a theme, then change any single colour. If a shade flickers on your monitor, try True black, Deep blue, Light or one of the editor palettes, or move the background colours a little.' }),
+    grid,
+    el('div', { class: 'row' },
+      el('button', { text: 'Reset colours to the theme', disabled: !settings.colors, onclick: () => { settings.colors = null; saveJson(SETTINGS_KEY, settings); renderSettings(); } })));
+}
+
 function renderSettings() {
+  applyTheme();
   const grid = el('div', { class: 'set' });
   for (const [key, label, lo, hi] of SETTING_FIELDS) {
     const id = 'set-' + key;
@@ -2488,6 +2579,7 @@ function renderSettings() {
       ? 'Most recent lactate reading within 5 bpm of the ceiling: ' + near.mmol + ' mmol/L at ' + Math.round(near.hr) + ' bpm on ' + fmtDate(near.t) + '. Aim for under about 1.5 mmol/L at the ceiling.'
       : 'No lactate reading within 5 bpm of the ceiling yet. Aim for under about 1.5 mmol/L at the ceiling.' }),
     el('div', { class: 'note', text: 'The cap works only while a ride is being recorded and a heart rate strap is connected.' }),
+    appearanceSettings(),
     stravaSettings());
 }
 
