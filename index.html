@@ -45,32 +45,40 @@
   button:disabled { opacity: 0.4; cursor: not-allowed; }
   button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent, #111); font-weight: 600; }
 
+  /* One row that never wraps: labels drop away as the window narrows, and it scrolls sideways as a last resort. */
   header {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
-    gap: 12px;
-    padding: 12px 16px;
+    gap: 14px;
+    padding: 8px 12px;
     border-bottom: 1px solid var(--line);
+    overflow-x: auto;
+    scrollbar-width: none;
   }
-  .device { display: flex; align-items: center; gap: 10px; }
-  .pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 14px;
-    color: var(--muted);
-    min-width: 0;
-  }
-  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--line); flex: none; }
-  .pill[data-st="on"] .dot { background: var(--ok); }
-  .pill[data-st="sim"] .dot { background: var(--sim); }
-  .pill[data-st="connecting"] .dot, .pill[data-st="reconnecting"] .dot { background: var(--warn); animation: blink 1s infinite; }
-  .pill[data-st="reconnecting"] { color: var(--warn); }
+  header::-webkit-scrollbar { display: none; }
+  header button { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; flex: none; }
+  header .group { display: flex; align-items: center; gap: 6px; flex: none; }
+  .ic { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .lbl { white-space: nowrap; }
+  .chip .lbl { max-width: 14ch; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 14px; }
+  .chip[data-st="on"] .lbl, .chip[data-st="sim"] .lbl { color: var(--text); }
+  .chip[data-st="reconnecting"] { border-color: var(--warn); }
+  .chip[data-st="reconnecting"] .lbl { color: var(--warn); }
+  #btn-sim { color: var(--sim); border-color: var(--sim); font-size: 13px; font-weight: 700; letter-spacing: 0.06em; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); opacity: 0.5; flex: none; }
+  .chip[data-st="on"] .dot { background: var(--ok); opacity: 1; }
+  .chip[data-st="sim"] .dot { background: var(--sim); opacity: 1; }
+  .chip[data-st="connecting"] .dot, .chip[data-st="reconnecting"] .dot { background: var(--warn); opacity: 1; animation: blink 1s infinite; }
   @keyframes blink { 50% { opacity: 0.25; } }
-  @media (prefers-reduced-motion: reduce) { .pill .dot { animation: none !important; } }
+  @media (prefers-reduced-motion: reduce) { .chip .dot { animation: none !important; } }
   .spacer { flex: 1; }
-  #clock { font-size: 28px; font-variant-numeric: tabular-nums; font-weight: 600; }
+  #clock { font-size: 26px; font-variant-numeric: tabular-nums; font-weight: 600; }
+  #dist { color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #btn-ride[data-rec="true"] { border-color: var(--bad); color: var(--bad); }
+  #btn-mini[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  @media (max-width: 1180px) { nav .lbl { display: none; } }
+  @media (max-width: 860px) { .chip .lbl, #btn-ride .lbl, #dist { display: none; } header { gap: 8px; } }
 
   #alert, #notice {
     margin: 12px 16px 0;
@@ -263,29 +271,27 @@
 
 <header>
   <nav>
-    <button id="nav-ride" aria-pressed="true">Ride</button>
-    <button id="nav-workouts" aria-pressed="false">Workouts</button>
-    <button id="nav-rides" aria-pressed="false">Rides</button>
-    <button id="nav-lactate" aria-pressed="false">Lactate</button>
-    <button id="nav-settings" aria-pressed="false">Settings</button>
+    <button id="nav-ride" data-icon="gauge" aria-pressed="true" aria-label="Ride" title="Ride"><span class="lbl">Ride</span></button>
+    <button id="nav-workouts" data-icon="bars" aria-pressed="false" aria-label="Workouts" title="Workouts"><span class="lbl">Workouts</span></button>
+    <button id="nav-rides" data-icon="history" aria-pressed="false" aria-label="Rides" title="Rides"><span class="lbl">Rides</span></button>
+    <button id="nav-lactate" data-icon="drop" aria-pressed="false" aria-label="Lactate" title="Lactate"><span class="lbl">Lactate</span></button>
+    <button id="nav-settings" data-icon="sliders" aria-pressed="false" aria-label="Settings" title="Settings"><span class="lbl">Settings</span></button>
   </nav>
-  <div class="device">
-    <button id="btn-trainer">Connect trainer</button>
-    <span class="pill" id="pill-trainer" data-st="off"><span class="dot"></span><span class="txt">Trainer: not connected</span></span>
-  </div>
-  <div class="device">
-    <button id="btn-hr">Connect strap</button>
-    <span class="pill" id="pill-hr" data-st="off"><span class="dot"></span><span class="txt">Strap: not connected</span></span>
-  </div>
-  <button id="btn-sim">Start simulator</button>
-  <button id="btn-coast" hidden>Sim: stop pedalling</button>
   <span class="spacer"></span>
-  <span class="pill">Ride time</span>
-  <span id="clock">0:00:00</span>
-  <span class="pill" id="dist" title="Estimated from power on a flat road"></span>
-  <button id="btn-ride">Start ride</button>
-  <button id="btn-lactate" disabled>Log lactate</button>
-  <button id="btn-mini" hidden title="A small always-on-top window with your numbers, for watching something else">Mini display</button>
+  <div class="group">
+    <button class="chip" id="btn-trainer" data-icon="wheel" data-st="off"><span class="dot"></span><span class="lbl" id="lbl-trainer">Trainer</span></button>
+    <button class="chip" id="btn-hr" data-icon="heart" data-st="off"><span class="dot"></span><span class="lbl" id="lbl-hr">Strap</span></button>
+    <button id="btn-sim" hidden aria-label="Simulator is on. Click to stop it." title="Simulator is on. Click to stop it.">SIM</button>
+  </div>
+  <div class="group">
+    <span id="clock" title="Ride time">0:00:00</span>
+    <span id="dist" title="Estimated from power on a flat road"></span>
+  </div>
+  <div class="group">
+    <button id="btn-ride" data-rec="false"></button>
+    <button id="btn-lactate" data-icon="drop" disabled aria-label="Log lactate" title="Log lactate (L)"></button>
+    <button id="btn-mini" data-icon="pip" hidden aria-pressed="false"></button>
+  </div>
 </header>
 
 <div id="notice" hidden></div>
@@ -514,7 +520,7 @@ const DEFAULTS = {
   capOn: true, ceiling: 138, capWindow: 30, capDelay: 60, capStep: 5, capMargin: 5, capHold: 180, capGrace: 300,
   minW: 50, maxW: 400, smoothSecs: 3,
   stopMmol: 4, testStart: 100, testStep: 20, testMins: 5, testCount: 6,
-  theme: 'dark', colors: null,
+  theme: 'dark', colors: null, miniStyle: 'video',
   distOn: true, massKg: 85, ftp: 0,
 };
 const settings = Object.assign({}, DEFAULTS, loadJson(SETTINGS_KEY, {}));
@@ -563,6 +569,21 @@ function themeColors() {
 }
 
 let mini = null;       // the floating mini display window, when open
+let miniVideo = null;  // the borderless mini display, drawn on a canvas and floated as a video
+
+const ICONS = {
+  gauge: '<path d="M4 17a8 8 0 1 1 16 0"/><path d="M12 17l4-6"/>',
+  bars: '<path d="M5 20v-8M12 20V5M19 20v-11"/>',
+  history: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  drop: '<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.500 6-11 6-11z"/>',
+  sliders: '<path d="M4 6h8M16 6h4M4 12h2M10 12h10M4 18h10M18 18h2"/><circle cx="14" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="18" r="2"/>',
+  wheel: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2"/><path d="M12 3v7M12 14v7M3 12h7M14 12h7"/>',
+  heart: '<path d="M12 20s-7.500-4.600-7.500-10.200A4.200 4.200 0 0 1 12 7.300a4.200 4.200 0 0 1 7.500 2.500C19.500 15.400 12 20 12 20z"/>',
+  record: '<circle cx="12" cy="12" r="6" fill="currentColor"/>',
+  stop: '<rect x="7" y="7" width="10" height="10" rx="1.500" fill="currentColor"/>',
+  pip: '<rect x="3" y="5" width="18" height="14" rx="2"/><rect x="12" y="11" width="6" height="5" rx="1" fill="currentColor" stroke="none"/>',
+};
+const iconSvg = (name) => '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">' + ICONS[name] + '</svg>';
 
 function applyTheme() {
   const c = themeColors();
@@ -915,8 +936,8 @@ class SimTrainer {
     this.slow = false;             // set from the console to test the low cadence guard
     this.watts = 0;
     this.bpm = 68;
-    hub.conn('trainer', 'sim', 'Simulated trainer');
-    hub.conn('hr', 'sim', 'Simulated strap');
+    hub.conn('trainer', 'sim', 'Simulator');
+    hub.conn('hr', 'sim', 'Simulator');
     this.timer = setInterval(() => this.tick(), 1000);
     log('Simulator started');
   }
@@ -2748,6 +2769,18 @@ function setSetting(key, value) {
   renderSettings();
 }
 
+function simulatorSettings() {
+  return el('div', null,
+    el('h3', { text: 'Simulator' }),
+    el('div', { class: 'note', text: 'Generates power, cadence and heart rate so you can try everything without a trainer. While it runs, a SIM marker shows in the top bar; click that to stop it. Adding ?sim to the address also starts it.' }),
+    el('div', { class: 'row' },
+      el('button', { id: 'set-sim', text: sim ? 'Stop simulator' : 'Start simulator', onclick: toggleSim }),
+      el('button', {
+        id: 'set-coast', disabled: !sim, text: sim && sim.coast ? 'Simulator: start pedalling' : 'Simulator: stop pedalling',
+        onclick: () => { if (sim) { sim.coast = !sim.coast; renderConn(); } },
+      })));
+}
+
 function appearanceSettings() {
   const colors = themeColors();
   const custom = settings.colors || {};
@@ -2768,9 +2801,17 @@ function appearanceSettings() {
         onchange: () => { saveJson(SETTINGS_KEY, settings); renderSettings(); },
       }));
   }
+  grid.append(
+    el('label', { for: 'set-mini-style', text: 'Mini display style' }),
+    el('select', {
+      id: 'set-mini-style',
+      onchange: (e) => { settings.miniStyle = e.target.value; saveJson(SETTINGS_KEY, settings); },
+    },
+      el('option', { value: 'video', text: 'Borderless', selected: settings.miniStyle !== 'window' }),
+      el('option', { value: 'window', text: 'Window with buttons', selected: settings.miniStyle === 'window' })));
   return el('div', null,
     el('h3', { text: 'Appearance' }),
-    el('div', { class: 'note', text: 'Pick a theme, then change any single colour. If a shade flickers on your monitor, try True black, Deep blue, Light or one of the editor palettes, or move the background colours a little.' }),
+    el('div', { class: 'note', text: 'Pick a theme, then change any single colour. If a shade flickers on your monitor, try True black, Deep blue, Light or one of the editor palettes, or move the background colours a little. The borderless mini display has no title bar; the window style has one but adds power and pause buttons.' }),
     grid,
     el('div', { class: 'row' },
       el('button', { text: 'Reset colours to the theme', disabled: !settings.colors, onclick: () => { settings.colors = null; saveJson(SETTINGS_KEY, settings); renderSettings(); } })));
@@ -2808,7 +2849,8 @@ function renderSettings() {
     el('div', { class: 'note', text: 'The cap works only while a ride is being recorded and a heart rate strap is connected.' }),
     appearanceSettings(),
     aiSettings(),
-    stravaSettings());
+    stravaSettings(),
+    simulatorSettings());
 }
 
 // ------------------------------------------------------------------ render
@@ -2865,32 +2907,49 @@ function render() {
     : 'Ceiling ' + settings.ceiling + ' bpm' + (rec && cap.avg != null ? ', ' + settings.capWindow + ' s average ' + Math.round(cap.avg) : '');
   $('clock').textContent = fmtClock(rec ? rec.samples.length * 1000 : 0);
   $('dist').textContent = rec && settings.distOn ? ((rec.meters || 0) / 1000).toFixed(2) + ' km' : '';
-  $('btn-ride').textContent = rec ? 'Finish ride' : 'Start ride';
+  const rideButton = $('btn-ride');
+  if (rideButton.dataset.rec !== String(!!rec) || !rideButton.firstChild) {
+    const text = rec ? 'Finish ride' : 'Start ride';
+    rideButton.dataset.rec = String(!!rec);
+    rideButton.innerHTML = iconSvg(rec ? 'stop' : 'record') + '<span class="lbl">' + text + '</span>';
+    rideButton.title = text;
+    rideButton.setAttribute('aria-label', text);
+  }
   $('btn-lactate').disabled = !rec;
-  $('btn-mini').textContent = mini ? 'Close mini display' : 'Mini display';
+  const miniOpen = !!(mini || miniVideo);
+  const miniTip = miniOpen ? 'Close the mini display' : 'Mini display: a small always-on-top view of your numbers, for watching something else';
+  $('btn-mini').title = miniTip;
+  $('btn-mini').setAttribute('aria-label', miniTip);
+  $('btn-mini').setAttribute('aria-pressed', String(miniOpen));
   if (mini) renderMini(power, hr, cad);
+  if (miniVideo) drawMiniCanvas(power, hr, cad);
   $('alert').hidden = !state.alert;
   $('alert').textContent = state.alert || '';
   renderRun();
 }
 
 function renderConn() {
-  const labels = { off: 'not connected', connecting: 'connecting', reconnecting: 'lost, reconnecting', on: '', sim: '' };
-  for (const [kind, title] of [['trainer', 'Trainer'], ['hr', 'Strap']]) {
-    const c = state.conn[kind];
-    const pill = $('pill-' + kind);
-    pill.dataset.st = c.st;
-    const text = labels[c.st] || c.name || '';
-    pill.querySelector('.txt').textContent = title + ': ' + text + (labels[c.st] && c.name ? ' (' + c.name + ')' : '');
-  }
   const hasBt = 'bluetooth' in navigator;
-  $('btn-trainer').textContent = trainer && trainer !== sim ? 'Disconnect trainer' : 'Connect trainer';
-  $('btn-hr').textContent = strap ? 'Disconnect strap' : 'Connect strap';
-  $('btn-trainer').disabled = !hasBt;
-  $('btn-hr').disabled = !hasBt;
-  $('btn-sim').textContent = sim ? 'Stop simulator' : 'Start simulator';
-  $('btn-coast').hidden = !sim;
-  $('btn-coast').textContent = sim && sim.coast ? 'Sim: start pedalling' : 'Sim: stop pedalling';
+  const words = { off: 'not connected', connecting: 'connecting', reconnecting: 'connection lost, reconnecting', on: 'connected', sim: 'simulated' };
+  for (const [kind, title, real] of [['trainer', 'Trainer', trainer && trainer !== sim], ['hr', 'Strap', !!strap]]) {
+    const c = state.conn[kind];
+    const chip = $('btn-' + kind);
+    chip.dataset.st = c.st;
+    $('lbl-' + kind).textContent = c.st === 'on' || c.st === 'sim' ? (c.name || title)
+      : c.st === 'connecting' ? 'Connecting' : c.st === 'reconnecting' ? 'Reconnecting' : title;
+    const tip = title + ': ' + words[c.st] + (c.st === 'on' && c.name ? ' to ' + c.name : '') + '. ' +
+      (!hasBt ? 'This browser has no Web Bluetooth.' : real ? 'Click to disconnect.' : 'Click to connect.');
+    chip.title = tip;
+    chip.setAttribute('aria-label', tip);
+    chip.disabled = !hasBt;
+  }
+  $('btn-sim').hidden = !sim;
+  const simButton = $('set-sim');
+  if (simButton) {
+    simButton.textContent = sim ? 'Stop simulator' : 'Start simulator';
+    $('set-coast').disabled = !sim;
+    $('set-coast').textContent = sim && sim.coast ? 'Simulator: start pedalling' : 'Simulator: stop pedalling';
+  }
 }
 
 // Ride time counts only while the pedals are turning.
@@ -2961,6 +3020,13 @@ const MINI_HTML = `
 
 async function toggleMini() {
   if (mini) { mini.close(); return; }
+  if (miniVideo) { closeMiniVideo(); return; }
+  const canWindow = 'documentPictureInPicture' in window;
+  if (!canWindow || (settings.miniStyle !== 'window' && document.pictureInPictureEnabled)) await openMiniVideo();
+  else await openMiniWindow();
+}
+
+async function openMiniWindow() {
   let win;
   try {
     win = await documentPictureInPicture.requestWindow({ width: 340, height: 280 });
@@ -2989,6 +3055,30 @@ async function toggleMini() {
   render();
 }
 
+// What both mini displays show besides the three numbers.
+function miniInfo(hr) {
+  const capped = !state.noCap && cap.watts < 0;
+  const info = {
+    target: state.target == null ? 'No target' : 'Target ' + state.target + ' W' + (capped ? ' (cap ' + cap.watts + ')' : ''),
+    block: rec ? 'Free ride' : 'Not recording',
+    time: rec ? fmtShort(rec.samples.length * 1000) : '',
+    status: '', progress: 0, go: '',
+    over: settings.capOn && hr != null && hr > settings.ceiling,
+  };
+  if (run) {
+    const total = totalSecs(run.workout) * 1000;
+    const pos = blockAt(run.workout, Math.min(run.elapsedMs, total - 1));
+    info.block = describeBlock(run.workout, pos.i);
+    info.time = fmtShort(pos.b.secs * 1000 - pos.into);
+    info.progress = clamp(run.elapsedMs / total, 0, 1);
+    info.status = { ready: 'Ready', running: '', paused: 'Paused', autopaused: 'Auto-paused', done: 'Done' }[run.status];
+    if (run.status === 'running' && pos.b.sample && pos.b.secs * 1000 - pos.into <= 30000) info.status = 'Lactate sample now';
+    if (run.stepPrompt) info.status = 'Enter lactate';
+    info.go = { ready: 'Start', running: 'Pause', paused: 'Resume', autopaused: 'Resume', done: 'Restart' }[run.status];
+  }
+  return info;
+}
+
 function renderMini(power, hr, cad) {
   const get = (id) => mini.document.getElementById(id);
   const put = (id, value) => {
@@ -2996,34 +3086,139 @@ function renderMini(power, hr, cad) {
     node.textContent = value == null ? '--' : Math.round(value);
     node.classList.toggle('stale', value == null);
   };
+  const info = miniInfo(hr);
   put('m-power', power);
   put('m-hr', hr);
   put('m-cad', cad);
-  get('m-hr').classList.toggle('over', settings.capOn && hr != null && hr > settings.ceiling);
-  const capped = !state.noCap && cap.watts < 0;
-  get('m-target').textContent = state.target == null ? 'No target' : 'Target ' + state.target + ' W' + (capped ? ' (cap ' + cap.watts + ')' : '');
+  get('m-hr').classList.toggle('over', info.over);
+  get('m-target').textContent = info.target;
+  get('m-block').textContent = info.block;
+  get('m-time').textContent = info.time;
+  get('m-status').textContent = info.status;
+  get('m-progress').style.width = (info.progress * 100).toFixed(1) + '%';
+  get('m-go').hidden = !run;
+  get('m-go').textContent = info.go;
+}
 
-  let block = rec ? 'Free ride' : 'Not recording';
-  let time = rec ? fmtShort(rec.samples.length * 1000) : '';
-  let status = '';
-  let progress = 0;
-  if (run) {
-    const total = totalSecs(run.workout) * 1000;
-    const pos = blockAt(run.workout, Math.min(run.elapsedMs, total - 1));
-    block = describeBlock(run.workout, pos.i);
-    time = fmtShort(pos.b.secs * 1000 - pos.into);
-    progress = clamp(run.elapsedMs / total, 0, 1);
-    status = { ready: 'Ready', running: '', paused: 'Paused', autopaused: 'Auto-paused', done: 'Done' }[run.status];
-    if (run.status === 'running' && pos.b.sample && pos.b.secs * 1000 - pos.into <= 30000) status = 'Lactate sample now';
-    if (run.stepPrompt) status = 'Enter lactate';
+// ---- borderless version: the same information drawn on a canvas, floated as a video.
+// A video picture-in-picture window has no title bar, but it cannot hold buttons. The
+// window's previous, next and play controls (and the keyboard's media keys) stand in for them.
+
+async function openMiniVideo() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 720;
+  canvas.height = 400;
+  const video = document.createElement('video');
+  video.muted = true;
+  video.playsInline = true;
+  video.style.cssText = 'position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:0;pointer-events:none';
+  document.body.append(video);
+  miniVideo = { canvas, ctx: canvas.getContext('2d'), video };
+  render();                                   // draw the first frame before capturing
+  try {
+    video.srcObject = canvas.captureStream(10);
+    await video.play();
+    await video.requestPictureInPicture();
+  } catch (err) {
+    closeMiniVideo();
+    state.alert = 'The mini display could not open: ' + err.message;
+    render();
+    return;
   }
-  get('m-block').textContent = block;
-  get('m-time').textContent = time;
-  get('m-status').textContent = status;
-  get('m-progress').style.width = (progress * 100).toFixed(1) + '%';
-  const go = get('m-go');
-  go.hidden = !run;
-  if (run) go.textContent = { ready: 'Start', running: 'Pause', paused: 'Resume', autopaused: 'Resume', done: 'Restart' }[run.status];
+  video.addEventListener('leavepictureinpicture', closeMiniVideo, { once: true });
+  video.addEventListener('pause', () => { if (miniVideo) video.play().catch(() => {}); });   // the picture must never freeze
+  setMediaKeys({
+    previoustrack: () => adjust(-STEP_W),
+    nexttrack: () => adjust(STEP_W),
+    play: () => { if (run) goAction(); },
+    pause: () => { if (run) goAction(); },
+  });
+  keepAwake();
+  render();
+}
+
+function setMediaKeys(handlers) {
+  if (!('mediaSession' in navigator)) return;
+  for (const action of ['previoustrack', 'nexttrack', 'play', 'pause']) {
+    try { navigator.mediaSession.setActionHandler(action, handlers ? handlers[action] : null); } catch (err) { /* not supported here */ }
+  }
+}
+
+function closeMiniVideo() {
+  const m = miniVideo;
+  if (!m) return;
+  miniVideo = null;
+  setMediaKeys(null);
+  if (document.pictureInPictureElement === m.video) document.exitPictureInPicture().catch(() => {});
+  if (m.video.srcObject) m.video.srcObject.getTracks().forEach((t) => t.stop());
+  m.video.remove();
+  render();
+}
+
+function drawMiniCanvas(power, hr, cad) {
+  const { ctx, canvas } = miniVideo;
+  const W = canvas.width, H = canvas.height;
+  const c = Object.assign({}, STATUS_COLORS, themeColors());
+  const info = miniInfo(hr);
+  const font = (px, weight) => { ctx.font = weight + ' ' + px + 'px system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif'; };
+  const label = (text, x, y) => { font(21, 600); ctx.fillStyle = c.muted; ctx.fillText(text.toUpperCase(), x, y); };
+  const number = (value, unit, x, y, px, color) => {
+    const text = value == null ? '--' : String(Math.round(value));
+    font(px, 700);
+    ctx.fillStyle = value == null ? c.muted : (color || c.text);
+    ctx.fillText(text, x, y);
+    const width = ctx.measureText(text).width;
+    font(Math.round(px * 0.28), 500);
+    ctx.fillStyle = c.muted;
+    ctx.fillText(unit, x + width + 10, y);
+  };
+  const fit = (text, max) => {
+    if (ctx.measureText(text).width <= max) return text;
+    while (text.length > 1 && ctx.measureText(text + '...').width > max) text = text.slice(0, -1);
+    return text + '...';
+  };
+
+  ctx.fillStyle = c.bg;
+  ctx.fillRect(0, 0, W, H);
+  ctx.textBaseline = 'alphabetic';
+  ctx.textAlign = 'left';
+  if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+
+  label('Power', 40, 56);
+  number(power, 'W', 34, 206, 170);
+  font(30, 600);
+  ctx.fillStyle = c.accent;
+  ctx.fillText(fit(info.target, 380), 40, 256);
+
+  label('Heart rate', 452, 56);
+  number(hr, 'bpm', 448, 138, 90, info.over ? c.bad : null);
+  label('Cadence', 452, 190);
+  number(cad, 'rpm', 448, 272, 90);
+
+  font(28, 700);
+  ctx.textAlign = 'right';
+  ctx.fillStyle = c.text;
+  ctx.fillText(info.time, W - 40, 338);
+  let room = W - 80 - ctx.measureText(info.time).width - 24;
+  ctx.textAlign = 'left';
+  let x = 40;
+  if (info.status) {
+    ctx.fillStyle = c.warn;
+    ctx.fillText(info.status, x, 338);
+    const used = ctx.measureText(info.status).width + 18;
+    x += used;
+    room -= used;
+  }
+  font(28, 500);
+  ctx.fillStyle = c.text;
+  if (room > 60) ctx.fillText(fit(info.block, room), x, 338);
+
+  ctx.fillStyle = c.line;
+  ctx.fillRect(0, H - 12, W, 12);
+  ctx.fillStyle = c.accent;
+  ctx.fillRect(0, H - 12, W * info.progress, 12);
+
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = run && run.status !== 'running' ? 'paused' : 'playing';
 }
 
 // ------------------------------------------------------------------ wiring
@@ -3036,7 +3231,8 @@ $('btn-ride').addEventListener('click', () => {
   if (confirm('Finish the ride and save it?')) finishRide();
 });
 $('btn-lactate').addEventListener('click', openLactateDialog);
-$('btn-mini').hidden = !('documentPictureInPicture' in window);
+for (const node of document.querySelectorAll('[data-icon]')) node.insertAdjacentHTML('afterbegin', iconSvg(node.dataset.icon));
+$('btn-mini').hidden = !('documentPictureInPicture' in window) && !document.pictureInPictureEnabled;
 $('btn-mini').addEventListener('click', toggleMini);
 $('btn-lac-cancel').addEventListener('click', () => $('dlg-lactate').close());
 $('form-lactate').addEventListener('submit', saveLactateDialog);
@@ -3057,7 +3253,6 @@ $('target-input').addEventListener('keydown', (e) => {
 });
 $('nav-ride').addEventListener('click', () => showView('ride'));
 $('nav-workouts').addEventListener('click', () => showView('workouts'));
-$('btn-coast').addEventListener('click', () => { if (sim) { sim.coast = !sim.coast; renderConn(); } });
 $('btn-go').addEventListener('click', goAction);
 $('btn-skip').addEventListener('click', skipBlock);
 $('btn-end').addEventListener('click', endRun);
