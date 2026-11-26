@@ -2502,7 +2502,8 @@ function renderSummary() {
   const clock = el('input', { type: 'text', placeholder: 'min:sec', 'aria-label': 'Time of reading as minutes and seconds', style: 'width:100px' });
   const mmol = el('input', { type: 'number', min: 0.1, max: 30, step: 0.1, placeholder: 'mmol/L', 'aria-label': 'Lactate reading in mmol per litre', style: 'width:110px' });
 
-  box.replaceChildren(
+  // replaceChildren prints a null argument as the text "null", so drop the parts that do not apply.
+  box.replaceChildren(...[
     el('div', { class: 'pane-head' },
       el('h2', { text: ride.name }),
       el('button', { text: 'All rides', onclick: () => showView('rides') }),
@@ -2530,7 +2531,7 @@ function renderSummary() {
     el('div', { class: 'row' }, clock, mmol,
       el('button', { text: 'Add reading', onclick: () => addLactateAfterRide(ride, clock.value, mmol.value) })),
     el('h3', { text: 'Strava' }),
-    stravaPanel(ride));
+    stravaPanel(ride)].filter(Boolean));
 }
 
 function renderRides() {
