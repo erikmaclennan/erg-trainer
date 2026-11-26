@@ -285,6 +285,7 @@
   <span class="pill" id="dist" title="Estimated from power on a flat road"></span>
   <button id="btn-ride">Start ride</button>
   <button id="btn-lactate" disabled>Log lactate</button>
+  <button id="btn-mini" hidden title="A small always-on-top window with your numbers, for watching something else">Mini display</button>
 </header>
 
 <div id="notice" hidden></div>
@@ -561,6 +562,8 @@ function themeColors() {
   return out;
 }
 
+let mini = null;       // the floating mini display window, when open
+
 function applyTheme() {
   const c = themeColors();
   const luminance = (hex) => {
@@ -568,11 +571,13 @@ function applyTheme() {
     const [r, g, b] = [n >> 16 & 255, n >> 8 & 255, n & 255].map((v) => (v / 255 <= 0.03928 ? v / 255 / 12.92 : Math.pow((v / 255 + 0.055) / 1.055, 2.4)));
     return 0.2126 * r + 0.7152 * g + 0.0722 * b;
   };
-  const root = document.documentElement.style;
-  for (const [key] of THEME_KEYS) root.setProperty('--' + key, c[key]);
-  for (const key of Object.keys(STATUS_COLORS)) root.setProperty('--' + key, c[key] || STATUS_COLORS[key]);
-  root.setProperty('--on-accent', luminance(c.accent) > 0.3 ? '#111111' : '#ffffff');
-  root.setProperty('color-scheme', luminance(c.bg) > 0.4 ? 'light' : 'dark');
+  const roots = [document.documentElement.style].concat(mini ? [mini.document.documentElement.style] : []);
+  for (const root of roots) {
+    for (const [key] of THEME_KEYS) root.setProperty('--' + key, c[key]);
+    for (const key of Object.keys(STATUS_COLORS)) root.setProperty('--' + key, c[key] || STATUS_COLORS[key]);
+    root.setProperty('--on-accent', luminance(c.accent) > 0.3 ? '#111111' : '#ffffff');
+    root.setProperty('color-scheme', luminance(c.bg) > 0.4 ? 'light' : 'dark');
+  }
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute('content', c.bg);
 }
@@ -588,6 +593,7 @@ const hub = {
     const t = performance.now();
     state.samples.push({ t, w });
     while (state.samples.length && state.samples[0].t < t - 10000) state.samples.shift();
+    tick();              // trainer data keeps the ride moving even when the browser slows this tab's timers
   },
   cadence(rpm) { state.cadence = rpm; state.cadenceAt = performance.now(); },
   hr(bpm) {
@@ -2861,6 +2867,8 @@ function render() {
   $('dist').textContent = rec && settings.distOn ? ((rec.meters || 0) / 1000).toFixed(2) + ' km' : '';
   $('btn-ride').textContent = rec ? 'Finish ride' : 'Start ride';
   $('btn-lactate').disabled = !rec;
+  $('btn-mini').textContent = mini ? 'Close mini display' : 'Mini display';
+  if (mini) renderMini(power, hr, cad);
   $('alert').hidden = !state.alert;
   $('alert').textContent = state.alert || '';
   renderRun();
@@ -2886,17 +2894,137 @@ function renderConn() {
 }
 
 // Ride time counts only while the pedals are turning.
+// One step of the app clock. It is driven by a timer, by the mini display's timer and by
+// incoming trainer data, because the browser slows timers in a tab that is not visible.
 let lastTick = performance.now();
-setInterval(() => {
+function tick() {
   const now = performance.now();
   const dt = now - lastTick;
+  if (dt < 200) return;
   lastTick = now;
   runTick(now, dt);
   recTick(now, dt);
   spiralTick(now);
   if (rec && now - lastProgressSave >= 10000) saveProgress();
   render();
-}, 250);
+}
+setInterval(tick, 250);
+
+// ------------------------------------------------------------- mini display
+
+// A small always-on-top window (Document Picture-in-Picture) so the numbers stay
+// visible while another tab or app is in front.
+
+const MINI_CSS = `
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden; display: flex; flex-direction: column;
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif; font-variant-numeric: tabular-nums; }
+  .top { flex: 1; display: grid; grid-template-columns: 1.25fr 1fr; gap: 2vw; padding: 3vw 4vw 0; min-height: 0; }
+  .cell { display: flex; flex-direction: column; justify-content: center; min-width: 0; }
+  .lab { font-size: max(10px, 3.4vw); color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  .big { font-size: min(21vw, 40vh); font-weight: 700; line-height: 1; letter-spacing: -0.02em; }
+  .mid { font-size: min(13vw, 25vh); font-weight: 700; line-height: 1; }
+  .unit { font-size: 0.3em; font-weight: 500; color: var(--muted); margin-left: 0.25em; letter-spacing: 0; }
+  #m-target { color: var(--accent); font-size: max(11px, 4.2vw); font-weight: 600; }
+  #m-hr.over { color: var(--bad); }
+  .stale { color: var(--muted); }
+  .info { padding: 1.5vw 4vw; display: flex; gap: 3vw; align-items: baseline; font-size: max(11px, 4.2vw); }
+  #m-block { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #m-time { font-weight: 700; }
+  #m-status { color: var(--warn); font-weight: 600; }
+  .bar { height: 4px; background: var(--line); }
+  #m-progress { height: 100%; width: 0; background: var(--accent); }
+  .btns { display: flex; gap: 2vw; padding: 2vw 4vw 3vw; }
+  button { flex: 1; font: inherit; font-size: max(11px, 3.8vw); color: var(--text); background: var(--panel);
+    border: 1px solid var(--line); border-radius: 8px; padding: 1.6vw 0; cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button[hidden] { display: none; }
+`;
+
+const MINI_HTML = `
+  <div class="top">
+    <div class="cell"><div class="lab">Power</div><div class="big"><span id="m-power">--</span><span class="unit">W</span></div><div id="m-target"></div></div>
+    <div class="cell">
+      <div class="lab">Heart rate</div><div class="mid"><span id="m-hr">--</span><span class="unit">bpm</span></div>
+      <div class="lab" style="margin-top:2vw">Cadence</div><div class="mid"><span id="m-cad">--</span><span class="unit">rpm</span></div>
+    </div>
+  </div>
+  <div class="info"><span id="m-block"></span><span id="m-status"></span><span id="m-time"></span></div>
+  <div class="bar"><div id="m-progress"></div></div>
+  <div class="btns">
+    <button id="m-minus" aria-label="Lower power by 5 watts">-5 W</button>
+    <button id="m-go">Start</button>
+    <button id="m-plus" aria-label="Raise power by 5 watts">+5 W</button>
+  </div>
+`;
+
+async function toggleMini() {
+  if (mini) { mini.close(); return; }
+  let win;
+  try {
+    win = await documentPictureInPicture.requestWindow({ width: 340, height: 280 });
+  } catch (err) {
+    state.alert = 'The mini display could not open: ' + err.message;
+    render();
+    return;
+  }
+  win.document.title = 'ERG Trainer';
+  win.document.head.append(Object.assign(win.document.createElement('style'), { textContent: MINI_CSS }));
+  win.document.body.innerHTML = MINI_HTML;
+  const on = (id, fn) => win.document.getElementById(id).addEventListener('click', fn);
+  on('m-minus', () => adjust(-STEP_W));
+  on('m-plus', () => adjust(STEP_W));
+  on('m-go', () => { if (run) goAction(); });
+  win.document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowUp') adjust(STEP_W);
+    if (e.key === 'ArrowDown') adjust(-STEP_W);
+    if (e.key === ' ' && run && !(e.target instanceof win.HTMLButtonElement)) goAction();
+  });
+  win.setInterval(tick, 250);                 // this window stays visible, so its timer is not slowed
+  win.addEventListener('pagehide', () => { mini = null; render(); });
+  mini = win;
+  applyTheme();
+  keepAwake();
+  render();
+}
+
+function renderMini(power, hr, cad) {
+  const get = (id) => mini.document.getElementById(id);
+  const put = (id, value) => {
+    const node = get(id);
+    node.textContent = value == null ? '--' : Math.round(value);
+    node.classList.toggle('stale', value == null);
+  };
+  put('m-power', power);
+  put('m-hr', hr);
+  put('m-cad', cad);
+  get('m-hr').classList.toggle('over', settings.capOn && hr != null && hr > settings.ceiling);
+  const capped = !state.noCap && cap.watts < 0;
+  get('m-target').textContent = state.target == null ? 'No target' : 'Target ' + state.target + ' W' + (capped ? ' (cap ' + cap.watts + ')' : '');
+
+  let block = rec ? 'Free ride' : 'Not recording';
+  let time = rec ? fmtShort(rec.samples.length * 1000) : '';
+  let status = '';
+  let progress = 0;
+  if (run) {
+    const total = totalSecs(run.workout) * 1000;
+    const pos = blockAt(run.workout, Math.min(run.elapsedMs, total - 1));
+    block = describeBlock(run.workout, pos.i);
+    time = fmtShort(pos.b.secs * 1000 - pos.into);
+    progress = clamp(run.elapsedMs / total, 0, 1);
+    status = { ready: 'Ready', running: '', paused: 'Paused', autopaused: 'Auto-paused', done: 'Done' }[run.status];
+    if (run.status === 'running' && pos.b.sample && pos.b.secs * 1000 - pos.into <= 30000) status = 'Lactate sample now';
+    if (run.stepPrompt) status = 'Enter lactate';
+  }
+  get('m-block').textContent = block;
+  get('m-time').textContent = time;
+  get('m-status').textContent = status;
+  get('m-progress').style.width = (progress * 100).toFixed(1) + '%';
+  const go = get('m-go');
+  go.hidden = !run;
+  if (run) go.textContent = { ready: 'Start', running: 'Pause', paused: 'Resume', autopaused: 'Resume', done: 'Restart' }[run.status];
+}
 
 // ------------------------------------------------------------------ wiring
 
@@ -2908,6 +3036,8 @@ $('btn-ride').addEventListener('click', () => {
   if (confirm('Finish the ride and save it?')) finishRide();
 });
 $('btn-lactate').addEventListener('click', openLactateDialog);
+$('btn-mini').hidden = !('documentPictureInPicture' in window);
+$('btn-mini').addEventListener('click', toggleMini);
 $('btn-lac-cancel').addEventListener('click', () => $('dlg-lactate').close());
 $('form-lactate').addEventListener('submit', saveLactateDialog);
 $('btn-lac-csv').addEventListener('click', exportLactateCsv);
