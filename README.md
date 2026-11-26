@@ -17,6 +17,7 @@ Always use the same address. Saved data belongs to that address in that browser.
 - Run controls: start, pause, skip, end, manual power offset, auto-pause.
 - Heart rate cap that lowers power in steps while heart rate is over the ceiling, then restores it.
 - One-second ride recording, ride summary, TCX and FIT download.
+- Power and heart rate drawn over the workout profile, live and on the ride summary, with readings on hover and averages per segment.
 - Estimated distance and speed from power, for a flat road with no wind. It can be turned off in Settings.
 - AI workout builder: describe a workout in plain language and a Claude model builds the blocks for you to review.
 - Colour themes, including common editor palettes, with per-colour overrides.
