@@ -47,6 +47,7 @@
 
   /* One row that never wraps: labels drop away as the window narrows, and it scrolls sideways as a last resort. */
   header {
+    flex: none;            /* a scrolling flex item may shrink to nothing, so pin its height */
     display: flex;
     flex-wrap: nowrap;
     align-items: center;
@@ -3107,7 +3108,7 @@ function renderMini(power, hr, cad) {
 async function openMiniVideo() {
   const canvas = document.createElement('canvas');
   canvas.width = 720;
-  canvas.height = 400;
+  canvas.height = 444;
   const video = document.createElement('video');
   video.muted = true;
   video.playsInline = true;
@@ -3180,6 +3181,9 @@ function drawMiniCanvas(power, hr, cad) {
 
   ctx.fillStyle = c.bg;
   ctx.fillRect(0, 0, W, H);
+  // Chrome lays the site name over the top of a picture-in-picture video, so keep that strip empty.
+  ctx.save();
+  ctx.translate(0, 44);
   ctx.textBaseline = 'alphabetic';
   ctx.textAlign = 'left';
   if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
@@ -3212,6 +3216,7 @@ function drawMiniCanvas(power, hr, cad) {
   font(28, 500);
   ctx.fillStyle = c.text;
   if (room > 60) ctx.fillText(fit(info.block, room), x, 338);
+  ctx.restore();
 
   ctx.fillStyle = c.line;
   ctx.fillRect(0, H - 12, W, 12);
