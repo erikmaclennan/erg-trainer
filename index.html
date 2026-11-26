@@ -3167,15 +3167,16 @@ const MINI_CSS = `
   .top { flex: 1; display: grid; grid-template-columns: 1.25fr 1fr; gap: 2vw; padding: 3vw 4vw 0; min-height: 0; }
   .cell { display: flex; flex-direction: column; justify-content: center; min-width: 0; }
   .lab { font-size: max(10px, 3.4vw); color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
-  .big { font-size: min(21vw, 40vh); font-weight: 700; line-height: 1; letter-spacing: -0.02em; }
-  .mid { font-size: min(13vw, 25vh); font-weight: 700; line-height: 1; }
+  .big { font-size: min(21vw, 32vh); font-weight: 700; line-height: 1; letter-spacing: -0.02em; }
+  .mid { font-size: min(13vw, 20vh); font-weight: 700; line-height: 1; }
   .unit { font-size: 0.3em; font-weight: 500; color: var(--muted); margin-left: 0.25em; letter-spacing: 0; }
   #m-target { color: var(--accent); font-size: max(11px, 4.2vw); font-weight: 600; }
   #m-hr.over { color: var(--bad); }
   .stale { color: var(--muted); }
   .info { padding: 1.5vw 4vw; display: flex; gap: 3vw; align-items: baseline; font-size: max(11px, 4.2vw); }
   #m-block { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #m-time { font-weight: 700; }
+  .times { display: flex; gap: 5vw; padding: 0 4vw 2vw; }
+  .times b { display: block; font-size: max(13px, 5.6vw); line-height: 1.1; }
   #m-status { color: var(--warn); font-weight: 600; }
   .bar { height: 4px; background: var(--line); }
   #m-progress { height: 100%; width: 0; background: var(--accent); }
@@ -3195,7 +3196,8 @@ const MINI_HTML = `
       <div class="lab" style="margin-top:2vw">Cadence</div><div class="mid"><span id="m-cad">--</span><span class="unit">rpm</span></div>
     </div>
   </div>
-  <div class="info"><span id="m-block"></span><span id="m-status"></span><span id="m-time"></span></div>
+  <div class="info"><span id="m-block"></span><span id="m-status"></span></div>
+  <div class="times" id="m-times"></div>
   <div class="bar"><div id="m-progress"></div></div>
   <div class="btns">
     <button id="m-minus" aria-label="Lower power by 5 watts">-5 W</button>
@@ -3215,7 +3217,7 @@ async function toggleMini() {
 async function openMiniWindow() {
   let win;
   try {
-    win = await documentPictureInPicture.requestWindow({ width: 340, height: 280 });
+    win = await documentPictureInPicture.requestWindow({ width: 340, height: 320 });
   } catch (err) {
     state.alert = 'The mini display could not open: ' + err.message;
     render();
@@ -3250,6 +3252,7 @@ function miniInfo(hr) {
     time: rec ? fmtShort(rec.samples.length * 1000) : '',
     status: '', progress: 0, go: '',
     over: settings.capOn && hr != null && hr > settings.ceiling,
+    cells: rec ? [['Ride time', fmtShort(rec.samples.length * 1000)]] : [],     // labelled times along the bottom
   };
   if (run) {
     const total = totalSecs(run.workout) * 1000;
@@ -3261,6 +3264,7 @@ function miniInfo(hr) {
     if (run.status === 'running' && pos.b.sample && pos.b.secs * 1000 - pos.into <= 30000) info.status = 'Lactate sample now';
     if (run.stepPrompt) info.status = 'Enter lactate';
     info.go = { ready: 'Start', running: 'Pause', paused: 'Resume', autopaused: 'Resume', done: 'Restart' }[run.status];
+    info.cells = [['Block left', info.time], ['Elapsed', fmtShort(riddenSecs() * 1000)], ['Remaining', fmtShort(total - Math.min(run.elapsedMs, total))]];
   }
   return info;
 }
@@ -3279,7 +3283,13 @@ function renderMini(power, hr, cad) {
   get('m-hr').classList.toggle('over', info.over);
   get('m-target').textContent = info.target;
   get('m-block').textContent = info.block;
-  get('m-time').textContent = info.time;
+  const doc = mini.document;
+  get('m-times').replaceChildren(...info.cells.map(([label, value]) => {
+    const cell = doc.createElement('div');
+    const name = Object.assign(doc.createElement('span'), { className: 'lab', textContent: label });
+    cell.append(name, Object.assign(doc.createElement('b'), { textContent: value }));
+    return cell;
+  }));
   get('m-status').textContent = info.status;
   get('m-progress').style.width = (info.progress * 100).toFixed(1) + '%';
   get('m-go').hidden = !run;
@@ -3293,7 +3303,7 @@ function renderMini(power, hr, cad) {
 async function openMiniVideo() {
   const canvas = document.createElement('canvas');
   canvas.width = 720;
-  canvas.height = 444;
+  canvas.height = 508;
   const video = document.createElement('video');
   video.muted = true;
   video.playsInline = true;
@@ -3385,22 +3395,27 @@ function drawMiniCanvas(power, hr, cad) {
   number(cad, 'rpm', 448, 272, 90);
 
   font(28, 700);
-  ctx.textAlign = 'right';
-  ctx.fillStyle = c.text;
-  ctx.fillText(info.time, W - 40, 338);
-  let room = W - 80 - ctx.measureText(info.time).width - 24;
-  ctx.textAlign = 'left';
+  let room = W - 80;
   let x = 40;
   if (info.status) {
     ctx.fillStyle = c.warn;
-    ctx.fillText(info.status, x, 338);
+    ctx.fillText(info.status, x, 328);
     const used = ctx.measureText(info.status).width + 18;
     x += used;
     room -= used;
   }
   font(28, 500);
   ctx.fillStyle = c.text;
-  if (room > 60) ctx.fillText(fit(info.block, room), x, 338);
+  if (room > 60) ctx.fillText(fit(info.block, room), x, 328);
+
+  // Labelled times: block left, elapsed and remaining in a workout, or ride time in a free ride.
+  info.cells.forEach(([name, value], i) => {
+    const cx = 40 + i * 226;
+    label(name, cx, 372);
+    font(36, 700);
+    ctx.fillStyle = c.text;
+    ctx.fillText(value, cx, 412);
+  });
   ctx.restore();
 
   ctx.fillStyle = c.line;
