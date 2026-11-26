@@ -238,12 +238,30 @@
   .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
   .stat .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
   .stat .v { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .chart { display: block; width: 100%; height: 160px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+  .chart { display: block; width: 100%; height: 240px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; cursor: crosshair; touch-action: pan-y; }
   .chart polyline { fill: none; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
-  .chart .p { stroke: var(--accent); }
+  .chart .plan { fill: var(--accent); fill-opacity: 0.22; }
+  .chart .p { stroke: var(--text); }
   .chart .h { stroke: var(--bad); }
+  .chart .seg { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+  .chart .cross { stroke: var(--muted); stroke-width: 1; vector-effect: non-scaling-stroke; }
+  .tchart { position: relative; }
+  .tchart .ax { position: absolute; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; pointer-events: none; padding: 4px 8px; }
+  .tip { position: absolute; z-index: 5; pointer-events: none; white-space: nowrap; background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 6px 10px; font-size: 13px; line-height: 1.45; font-variant-numeric: tabular-nums; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35); }
+  .tip div:first-child { font-weight: 700; }
+  .legend .kt { color: var(--accent); } .legend .kw { color: var(--text); font-weight: 600; }
+  #strip { position: relative; }
+  #w-profile { height: 84px; cursor: crosshair; }
+  svg.profile .tp, svg.profile .th { fill: none; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  svg.profile .tp { stroke: var(--text); }
+  svg.profile .th { stroke: var(--bad); }
+  #w-legend { margin: 4px 0 0; }
+  td.num, th.num { text-align: right; }
+  tr.total td { font-weight: 700; border-top: 2px solid var(--line); }
   .legend { color: var(--muted); font-size: 13px; margin: 6px 0 14px; }
   .legend .kp { color: var(--accent); } .legend .kh { color: var(--bad); }
+  .legend { color: var(--muted); font-size: 13px; }
   .tscroll { overflow-x: auto; }
   table { border-collapse: collapse; width: 100%; font-size: 14px; font-variant-numeric: tabular-nums; }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
@@ -320,6 +338,8 @@
     <button id="btn-prompt-dismiss">Dismiss</button>
   </div>
   <svg class="profile" id="w-profile" viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true"></svg>
+  <div class="legend" id="w-legend"><span class="kt">Plan</span>, <span class="kw">power</span> and <span class="kh">heart rate</span> so far. Hover the chart for the readings.</div>
+  <div class="tip" id="w-tip" hidden></div>
 </section>
 
 <main>
@@ -1528,7 +1548,7 @@ function holdRun(status, why) {
 
 function goAction() {
   if (!run) return;
-  if (run.status === 'ready') { startRide(run.workout.name); setRunning('Workout started'); }
+  if (run.status === 'ready') { startRide(run.workout.name); rec.plan = run.workout.blocks; setRunning('Workout started'); }
   else if (run.status === 'running') holdRun('paused', 'Workout paused');
   else if (run.status === 'paused' || run.status === 'autopaused') setRunning('Workout resumed');
   else if (run.status === 'done') { run.elapsedMs = 0; run.blockIndex = -1; setRunning('Workout restarted'); }
@@ -1600,6 +1620,77 @@ function runTick(now, dt) {
   else sendRunTarget(false);
 }
 
+// ---- what was actually ridden, drawn over the plan
+
+const profileTop = (w) => Math.max(100, ...flatBlocks(w).map((b) => Math.max(startWatts(b), endWatts(b)))) * 1.1;
+const hrRange = (values) => (values.length ? [Math.min(...values) - 10, Math.max(...values) + 5] : [0, 1]);
+
+// Power and heart rate so far as two lines in the profile's own coordinates. Power shares the
+// plan's watt scale, so the line sits on the plan when the trainer is holding the target.
+function liveTrace() {
+  if (!rec) return '';
+  const n = rec.samples.length;
+  if (run.traceAt === n) return run.trace;
+  const total = totalSecs(run.workout) || 1;
+  const top = profileTop(run.workout);
+  const pts = rec.samples.filter((s) => s[5] != null);
+  const [lo, hi] = hrRange(pts.map((s) => s[2]).filter((v) => v != null));
+  const size = Math.max(1, Math.ceil(pts.length / 400));
+  let power = '', heart = '';
+  for (let i = 0; i < pts.length; i += size) {
+    const part = pts.slice(i, i + size);
+    const x = (part[0][5] / total * 1000).toFixed(1);
+    const w = mean(part.map((s) => s[1]).filter((v) => v != null));
+    const h = mean(part.map((s) => s[2]).filter((v) => v != null));
+    if (w != null) power += x + ',' + (100 - clamp(w / top, 0, 1) * 100).toFixed(1) + ' ';
+    if (h != null) heart += x + ',' + (96 - clamp((h - lo) / (hi - lo), 0, 1) * 92).toFixed(1) + ' ';
+  }
+  run.traceAt = n;
+  run.trace = '<polyline class="th" points="' + heart + '"/><polyline class="tp" points="' + power + '"/>';
+  return run.trace;
+}
+
+// Shows a small box of readings next to the pointer. describe(fraction across the chart)
+// returns the lines to show, or null for nothing.
+function attachHover(target, tip, describe) {
+  const show = (e) => {
+    const box = target.getBoundingClientRect();
+    const lines = describe(clamp((e.clientX - box.left) / box.width, 0, 1));
+    tip.hidden = !lines;
+    if (!lines) return;
+    tip.replaceChildren(...lines.map((text) => el('div', { text })));
+    const host = tip.offsetParent.getBoundingClientRect();
+    const x = e.clientX - host.left;
+    const flip = x + 16 + tip.offsetWidth > host.width;
+    tip.style.left = Math.max(0, flip ? x - 12 - tip.offsetWidth : x + 12) + 'px';
+    tip.style.top = (box.top - host.top + 6) + 'px';
+  };
+  target.addEventListener('pointermove', show);
+  target.addEventListener('pointerdown', show);
+  target.addEventListener('pointerleave', () => { tip.hidden = true; });
+}
+
+function sampleLines(s, heading) {
+  return [heading,
+    'Power ' + fmtNum(s[1], ' W') + (s[4] != null ? ' (target ' + s[4] + ' W)' : ''),
+    'Heart rate ' + fmtNum(s[2], ' bpm'),
+    'Cadence ' + fmtNum(s[3], ' rpm')];
+}
+
+// Hover on the live profile: the plan at that moment, and the readings if that part has been ridden.
+function describeLivePoint(fraction) {
+  if (!run) return null;
+  const w = run.workout;
+  const secs = fraction * totalSecs(w);
+  const pos = blockAt(w, Math.min(secs * 1000, totalSecs(w) * 1000 - 1));
+  if (!pos) return null;
+  const heading = fmtShort(secs * 1000) + '  ' + describeBlock(w, pos.i);
+  const planned = 'Plan ' + Math.round(plannedWatts(pos.b, pos.into)) + ' W';
+  let near = null;
+  if (rec) for (const s of rec.samples) if (s[5] != null && Math.abs(s[5] - secs) <= 2 && (!near || Math.abs(s[5] - secs) < Math.abs(near[5] - secs))) near = s;
+  return near ? sampleLines(near, heading) : [heading, planned, 'Not ridden yet'];
+}
+
 function renderRun() {
   document.body.classList.toggle('has-run', !!run);
   $('strip').hidden = !run;
@@ -1624,7 +1715,7 @@ function renderRun() {
   $('w-block-left').textContent = done ? '0:00' : fmtShort(pos.b.secs * 1000 - pos.into);
   $('w-elapsed').textContent = fmtShort(Math.floor(Math.min(run.elapsedMs, total) / 1000) * 1000);
   $('w-left').textContent = fmtShort(total - Math.min(run.elapsedMs, total));
-  $('w-profile').innerHTML = profileMarkup(w, run.elapsedMs);
+  $('w-profile').innerHTML = profileMarkup(w, run.elapsedMs) + liveTrace();
 
   // Lactate step test prompts.
   const isLast = pos.i === w.blocks.length - 1;
@@ -1650,8 +1741,9 @@ function renderRun() {
 
 // ---------------------------------------------------------------- recording
 
-// A ride is { id, name, startedAt, samples, stats }. Each sample is one second
-// of riding: [epoch ms, power, heart rate, cadence, target]. Missing values are null.
+// A ride is { id, name, startedAt, samples, stats, plan }. Each sample is one second of riding:
+// [epoch ms, power, heart rate, cadence, target, seconds into the workout]. Missing values are null.
+// plan is the flat block list of the workout that was ridden, when there was one.
 
 const RIDES_KEY = 'erg.rides.v1';
 const LACTATE_KEY = 'erg.lactate.v1';
@@ -1704,6 +1796,7 @@ function recTick(now, dt) {
       state.hr != null && fresh(state.hrAt) ? Math.round(state.hr) : null,
       state.cadence != null && fresh(state.cadenceAt) ? Math.round(state.cadence) : null,
       state.target,
+      run && run.status === 'running' ? Math.floor(run.elapsedMs / 1000) : null,   // seconds into the workout
     ]);
     if (settings.distOn) rec.meters = (rec.meters || 0) + speedFor(rec.samples[rec.samples.length - 1][1] || 0, settings.massKg);
     capTick();
@@ -2287,28 +2380,94 @@ function tcxFileName(ride) {
   return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + '-' + slug + '.tcx';
 }
 
-// Power and heart rate against riding time, each on its own scale.
-function rideChart(ride) {
+// Seconds of a ride grouped by the workout block they were ridden in, with averages for each.
+function sliceStats(part) {
+  const col = (c, positive) => part.map((s) => s[c]).filter((v) => v != null && (!positive || v > 0));
+  const hr = col(2);
+  return { secs: part.length, p: mean(col(1)), tgt: mean(col(4)), hr: mean(hr), maxHr: hr.length ? Math.max(...hr) : null, cad: mean(col(3, true)) };
+}
+
+function rideSegments(ride) {
+  if (!Array.isArray(ride.plan) || !ride.plan.length) return [];
+  const w = { blocks: ride.plan };
+  const groups = [];
+  ride.samples.forEach((s, at) => {
+    const pos = s[5] == null ? null : blockAt(w, s[5] * 1000);
+    const key = pos ? pos.i : -1;
+    const last = groups[groups.length - 1];
+    if (last && last.key === key) { last.to = at + 1; return; }
+    groups.push({ key, name: pos ? describeBlock(w, pos.i) : 'Outside the workout', from: at, to: at + 1 });
+  });
+  return groups.map((g) => Object.assign(g, sliceStats(ride.samples.slice(g.from, g.to))));
+}
+
+function segmentTable(ride, segments) {
+  if (!segments.length) return null;
+  const row = (name, st, cls) => el('tr', { class: cls || '' },
+    el('td', { text: name }),
+    el('td', { class: 'num', text: fmtShort(st.secs * 1000) }),
+    el('td', { class: 'num', text: fmtNum(st.p, ' W') }),
+    el('td', { class: 'num', text: fmtNum(st.tgt, ' W') }),
+    el('td', { class: 'num', text: fmtNum(st.hr, ' bpm') }),
+    el('td', { class: 'num', text: fmtNum(st.maxHr, ' bpm') }),
+    el('td', { class: 'num', text: fmtNum(st.cad, ' rpm') }));
+  const heads = ['Segment', 'Time', 'Avg power', 'Avg target', 'Avg HR', 'Max HR', 'Avg cadence'];
+  return el('div', { class: 'tscroll' }, el('table', null,
+    el('thead', null, el('tr', null, ...heads.map((h, i) => el('th', { class: i ? 'num' : '', text: h })))),
+    el('tbody', null, ...segments.map((g) => row(g.name, g)), row('Whole ride', sliceStats(ride.samples), 'total'))));
+}
+
+// The planned target as a shaded area with power and heart rate drawn over it, against
+// riding time. Power and target share one scale; heart rate has its own.
+function rideChart(ride, segments) {
   const S = ride.samples;
+  const n = S.length;
+  const maxP = Math.max(100, ...S.map((s) => Math.max(s[1] || 0, s[4] || 0))) * 1.1;
+  const [lo, hi] = hrRange(S.map((s) => s[2]).filter((v) => v != null));
+  const x = (i) => (n > 1 ? i / (n - 1) * 1000 : 0).toFixed(1);
+  const yP = (v) => (100 - clamp(v / maxP, 0, 1) * 96).toFixed(1);
+  const yH = (v) => (100 - clamp((v - lo) / (hi - lo), 0, 1) * 96).toFixed(1);
+  const size = Math.max(1, Math.ceil(n / 600));
+  let area = '0,100 ', power = '', heart = '';
+  for (let i = 0; i < n; i += size) {
+    const part = S.slice(i, i + size);
+    const avg = (c) => mean(part.map((s) => s[c]).filter((v) => v != null));
+    const t = avg(4), w = avg(1), h = avg(2);
+    area += x(i) + ',' + (t == null ? '100' : yP(t)) + ' ';
+    if (w != null) power += x(i) + ',' + yP(w) + ' ';
+    if (h != null) heart += x(i) + ',' + yH(h) + ' ';
+  }
+  area += '1000,100';
+  const bounds = segments.slice(1).map((g) => '<line class="seg" x1="' + x(g.from) + '" x2="' + x(g.from) + '" y1="0" y2="100"/>').join('');
+
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('class', 'chart');
   svg.setAttribute('viewBox', '0 0 1000 100');
   svg.setAttribute('preserveAspectRatio', 'none');
   svg.setAttribute('role', 'img');
-  svg.setAttribute('aria-label', 'Power and heart rate over the ride');
-  const size = Math.max(1, Math.ceil(S.length / 500));
-  const line = (col, lo, hi, cls) => {
-    const pts = [];
-    for (let i = 0; i < S.length; i += size) {
-      const v = mean(S.slice(i, i + size).map((s) => s[col]).filter((x) => x != null));
-      if (v != null) pts.push((i / S.length * 1000).toFixed(1) + ',' + (96 - clamp((v - lo) / (hi - lo), 0, 1) * 92).toFixed(1));
-    }
-    return '<polyline class="' + cls + '" points="' + pts.join(' ') + '"/>';
-  };
-  const maxP = Math.max(100, ...S.map((s) => s[1] || 0));
-  const hrs = S.map((s) => s[2]).filter((v) => v != null);
-  svg.innerHTML = line(1, 0, maxP * 1.1, 'p') + (hrs.length ? line(2, Math.min(...hrs) - 10, Math.max(...hrs) + 5, 'h') : '');
-  return svg;
+  svg.setAttribute('aria-label', 'Planned target, power and heart rate over the ride. The segment table below has the averages.');
+  svg.innerHTML = '<polygon class="plan" points="' + area + '"/>' + bounds +
+    '<polyline class="h" points="' + heart + '"/><polyline class="p" points="' + power + '"/>' +
+    '<line class="cross" x1="0" x2="0" y1="0" y2="100" visibility="hidden"/>';
+
+  const tip = el('div', { class: 'tip', hidden: true });
+  const hasHr = hi > 1;
+  const box = el('div', { class: 'tchart' }, svg, tip,
+    el('div', { class: 'ax', style: 'left:0;top:0', text: Math.round(maxP) + ' W' }),
+    el('div', { class: 'ax', style: 'left:0;bottom:0', text: '0 W' }),
+    hasHr ? el('div', { class: 'ax', style: 'right:0;top:0', text: Math.round(hi) + ' bpm' }) : null,
+    hasHr ? el('div', { class: 'ax', style: 'right:0;bottom:0', text: Math.round(lo) + ' bpm' }) : null);
+  const cross = svg.querySelector('.cross');
+  attachHover(svg, tip, (fraction) => {
+    const at = Math.round(fraction * (n - 1));
+    const segment = segments.find((g) => at >= g.from && at < g.to);
+    cross.setAttribute('x1', x(at));
+    cross.setAttribute('x2', x(at));
+    cross.setAttribute('visibility', 'visible');
+    return sampleLines(S[at], fmtShort(at * 1000) + (segment ? '  ' + segment.name : ''));
+  });
+  svg.addEventListener('pointerleave', () => cross.setAttribute('visibility', 'hidden'));
+  return box;
 }
 
 function renderSummary() {
@@ -2318,6 +2477,7 @@ function renderSummary() {
   const st = ride.stats;
   const stat = (label, value) => el('div', { class: 'stat' }, el('div', { class: 'label', text: label }), el('div', { class: 'v', text: value }));
   const has = ride.samples.length > 0;
+  const segments = has ? rideSegments(ride) : [];
   const clock = el('input', { type: 'text', placeholder: 'min:sec', 'aria-label': 'Time of reading as minutes and seconds', style: 'width:100px' });
   const mmol = el('input', { type: 'number', min: 0.1, max: 30, step: 0.1, placeholder: 'mmol/L', 'aria-label': 'Lactate reading in mmol per litre', style: 'width:110px' });
 
@@ -2339,8 +2499,11 @@ function renderSummary() {
       st.meters != null ? stat('Distance (est.)', (st.meters / 1000).toFixed(2) + ' km') : null,
       st.meters != null && st.secs ? stat('Avg speed (est.)', (st.meters / st.secs * 3.6).toFixed(1) + ' km/h') : null,
       stat('HR drift', st.drift == null ? '--' : (st.drift > 0 ? '+' : '') + st.drift.toFixed(1) + ' %')),
-    has ? rideChart(ride) : null,
-    has ? el('div', { class: 'legend' }, el('span', { class: 'kp', text: 'Power' }), ' and ', el('span', { class: 'kh', text: 'heart rate' }), ' against riding time. Each line has its own scale.') : null,
+    has ? rideChart(ride, segments) : null,
+    has ? el('div', { class: 'legend' }, el('span', { class: 'kt', text: 'Planned target' }), ' (shaded), ', el('span', { class: 'kw', text: 'power' }), ' and ', el('span', { class: 'kh', text: 'heart rate' }),
+      ' against riding time. Power and target share a scale; heart rate has its own. Hover the chart for the readings.') : null,
+    has && segments.length ? el('h3', { text: 'Segments' }) : null,
+    has ? segmentTable(ride, segments) : null,
     el('h3', { text: 'Lactate readings' }),
     lactateTable(lactate.filter((x) => x.rideId === ride.id).sort((a, b) => a.elapsed - b.elapsed), false),
     el('div', { class: 'row' }, clock, mmol,
@@ -3236,6 +3399,7 @@ $('btn-ride').addEventListener('click', () => {
   if (confirm('Finish the ride and save it?')) finishRide();
 });
 $('btn-lactate').addEventListener('click', openLactateDialog);
+attachHover($('w-profile'), $('w-tip'), describeLivePoint);
 for (const node of document.querySelectorAll('[data-icon]')) node.insertAdjacentHTML('afterbegin', iconSvg(node.dataset.icon));
 $('btn-mini').hidden = !('documentPictureInPicture' in window) && !document.pictureInPictureEnabled;
 $('btn-mini').addEventListener('click', toggleMini);
