@@ -20,6 +20,7 @@ Always use the same address. Saved data belongs to that address in that browser.
 - Estimated distance and speed from power, for a flat road with no wind. It can be turned off in Settings.
 - AI workout builder: describe a workout in plain language and a Claude model builds the blocks for you to review.
 - Colour themes, including common editor palettes, with per-colour overrides.
+- Floating mini display: a small always-on-top window with power, heart rate, cadence and block time, for watching something else while you ride.
 - Direct Strava upload as a Virtual Ride.
 - Lactate log with charts and CSV export, and a guided lactate step test.
 - Recovery of a ride in progress after an accidental reload.
