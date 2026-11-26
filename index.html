@@ -211,6 +211,13 @@
   .keys i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
   .page a { color: var(--accent); }
   #ai-status.err { color: var(--bad); }
+  #ai-prompt {
+    display: block; width: 100%; min-height: 104px; resize: vertical;
+    font: inherit; font-size: 17px; line-height: 1.45; color: var(--text);
+    background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
+  }
+  #ai-prompt::placeholder { color: var(--muted); opacity: 0.8; }
+  #ai-prompt:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
   .page textarea { width: 100%; min-height: 90px; resize: vertical; font: inherit; color: inherit; }
   .field { display: block; margin: 10px 0 4px; color: var(--muted); font-size: 14px; }
   .wide { width: 100%; }
@@ -2543,7 +2550,7 @@ function stravaPanel(ride) {
 
 const AI_KEY = 'erg.ai.v1';
 const AI_MODEL = 'claude-opus-5-5';
-const ai = Object.assign({ apiKey: '' }, loadJson(AI_KEY, {}));
+const ai = Object.assign({ apiKey: '', workspaceId: '' }, loadJson(AI_KEY, {}));
 let aiState = { busy: false, text: '', error: false, prompt: '' };
 
 // Structured output schema. It mirrors the workout format; repeats hold only steady and ramp blocks.
@@ -2616,20 +2623,19 @@ async function aiRequest(description) {
     system: aiSystemPrompt(),
     messages: [{ role: 'user', content: description }],
   });
+  const headers = {
+    'content-type': 'application/json',
+    'x-api-key': ai.apiKey,
+    'anthropic-version': '2026-10-21',
+    'anthropic-beta': 'server-side-fallback-2026-07-01',
+    'anthropic-dangerous-direct-browser-access': 'true',
+  };
+  // A key that is not tied to one workspace has to say which workspace to bill.
+  if (ai.workspaceId) headers['anthropic-workspace-id'] = ai.workspaceId;
   for (let attempt = 1; ; attempt++) {
     let res;
     try {
-      res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-api-key': ai.apiKey,
-          'anthropic-version': '2026-10-21',
-          'anthropic-beta': 'server-side-fallback-2026-07-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
-        body,
-      });
+      res = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers, body });
     } catch (err) {
       throw new Error('Could not reach the Anthropic API. Check the internet connection.');
     }
@@ -2638,6 +2644,7 @@ async function aiRequest(description) {
     const busy = res.status === 429 || res.status >= 500;
     if (busy && attempt < 3) { await sleep(1500 * attempt); continue; }
     const detail = data.error && data.error.message ? data.error.message : 'HTTP ' + res.status;
+    if (/workspace/i.test(detail) && !ai.workspaceId) throw new Error('This API key is not tied to a workspace. Add the Workspace ID in Settings, under AI workout builder, or use a key created inside a workspace.');
     if (res.status === 401) throw new Error('The API key was rejected. Check it in Settings.');
     if (res.status === 429) throw new Error('The API key is rate limited or out of credit: ' + detail);
     if (res.status >= 500) throw new Error('The Anthropic API is busy. Try again in a moment.');
@@ -2677,6 +2684,7 @@ function aiCard() {
     id: 'ai-prompt', 'aria-label': 'Describe the workout you want',
     placeholder: 'For example: 60 minutes easy with four 3 minute efforts at 220 W and 3 minutes easy between them',
     oninput: (e) => { aiState.prompt = e.target.value; $('btn-ai-build').disabled = !hasKey || aiState.busy || !aiState.prompt.trim(); },
+    onkeydown: (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && hasKey) { e.preventDefault(); buildWorkoutFromText(); } },
   });
   box.value = aiState.prompt;
   return el('div', { class: 'wk' },
@@ -2684,7 +2692,7 @@ function aiCard() {
     el('div', { class: 'wk-dur', text: 'Write what you want to ride and a model builds the blocks. You check the result in the editor before it is saved.' }),
     el('div', { style: 'margin-top:10px' }, box),
     el('div', { class: 'row' },
-      el('span', { id: 'ai-status', class: 'note' + (aiState.error ? ' err' : ''), text: aiState.text || (hasKey ? '' : 'Add an Anthropic API key in Settings to use this.') }),
+      el('span', { id: 'ai-status', class: 'note' + (aiState.error ? ' err' : ''), text: aiState.text || (hasKey ? 'Cmd or Ctrl + Enter also builds.' : 'Add an Anthropic API key in Settings to use this.') }),
       el('span', { class: 'spacer' }),
       el('button', { id: 'btn-ai-build', class: 'primary', text: aiState.busy ? 'Building' : 'Build workout', disabled: !hasKey || aiState.busy || !aiState.prompt.trim(), onclick: buildWorkoutFromText })));
 }
@@ -2697,6 +2705,11 @@ function aiSettings() {
     el('input', {
       id: 'ai-key', type: 'password', class: 'wide', value: ai.apiKey, autocomplete: 'off', spellcheck: 'false',
       onchange: (e) => { ai.apiKey = e.target.value.trim(); saveJson(AI_KEY, ai); renderSettings(); },
+    }),
+    el('label', { class: 'field', for: 'ai-workspace', text: 'Workspace ID (only needed when the key is not scoped to a workspace)' }),
+    el('input', {
+      id: 'ai-workspace', type: 'text', class: 'wide', value: ai.workspaceId, autocomplete: 'off', spellcheck: 'false',
+      onchange: (e) => { ai.workspaceId = e.target.value.trim(); saveJson(AI_KEY, ai); renderSettings(); },
     }),
     el('div', { class: 'note', text: ai.apiKey ? 'Key saved. Model: ' + AI_MODEL + '. Set your FTP above so zones and percentages become the right watts.' : 'No key saved.' }));
 }
