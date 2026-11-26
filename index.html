@@ -1636,18 +1636,39 @@ function liveTrace() {
   const pts = rec.samples.filter((s) => s[5] != null);
   const [lo, hi] = hrRange(pts.map((s) => s[2]).filter((v) => v != null));
   const size = Math.max(1, Math.ceil(pts.length / 400));
-  let power = '', heart = '';
-  for (let i = 0; i < pts.length; i += size) {
-    const part = pts.slice(i, i + size);
-    const x = (part[0][5] / total * 1000).toFixed(1);
-    const w = mean(part.map((s) => s[1]).filter((v) => v != null));
-    const h = mean(part.map((s) => s[2]).filter((v) => v != null));
-    if (w != null) power += x + ',' + (100 - clamp(w / top, 0, 1) * 100).toFixed(1) + ' ';
-    if (h != null) heart += x + ',' + (96 - clamp((h - lo) / (hi - lo), 0, 1) * 92).toFixed(1) + ' ';
+
+  // A skipped block leaves a jump in the workout position. Start a new line there, so the
+  // stretch that was never ridden stays empty.
+  const stretches = [];
+  for (const s of pts) {
+    const last = stretches[stretches.length - 1];
+    const step = last ? s[5] - last[last.length - 1][5] : 0;
+    if (!last || step < 0 || step > 2) stretches.push([s]); else last.push(s);
+  }
+  let out = '';
+  for (const stretch of stretches) {
+    let power = '', heart = '';
+    for (let i = 0; i < stretch.length; i += size) {
+      const part = stretch.slice(i, i + size);
+      const x = (part[0][5] / total * 1000).toFixed(1);
+      const w = mean(part.map((s) => s[1]).filter((v) => v != null));
+      const h = mean(part.map((s) => s[2]).filter((v) => v != null));
+      if (w != null) power += x + ',' + (100 - clamp(w / top, 0, 1) * 100).toFixed(1) + ' ';
+      if (h != null) heart += x + ',' + (96 - clamp((h - lo) / (hi - lo), 0, 1) * 92).toFixed(1) + ' ';
+    }
+    out += '<polyline class="th" points="' + heart + '"/><polyline class="tp" points="' + power + '"/>';
   }
   run.traceAt = n;
-  run.trace = '<polyline class="th" points="' + heart + '"/><polyline class="tp" points="' + power + '"/>';
+  run.trace = out;
+  run.ridden = pts.length;        // seconds actually ridden inside the workout
   return run.trace;
+}
+
+// Time ridden in the workout so far. Skipping a block moves the plan forward but not this.
+function riddenSecs() {
+  if (!rec || !run) return 0;
+  liveTrace();
+  return run.ridden || 0;
 }
 
 // Shows a small box of readings next to the pointer. describe(fraction across the chart)
@@ -1688,7 +1709,7 @@ function describeLivePoint(fraction) {
   const planned = 'Plan ' + Math.round(plannedWatts(pos.b, pos.into)) + ' W';
   let near = null;
   if (rec) for (const s of rec.samples) if (s[5] != null && Math.abs(s[5] - secs) <= 2 && (!near || Math.abs(s[5] - secs) < Math.abs(near[5] - secs))) near = s;
-  return near ? sampleLines(near, heading) : [heading, planned, 'Not ridden yet'];
+  return near ? sampleLines(near, heading) : [heading, planned, secs * 1000 < run.elapsedMs ? 'Skipped' : 'Not ridden yet'];
 }
 
 function renderRun() {
@@ -1713,7 +1734,7 @@ function renderRun() {
   }[run.status];
   $('w-next').textContent = done ? '' : next;
   $('w-block-left').textContent = done ? '0:00' : fmtShort(pos.b.secs * 1000 - pos.into);
-  $('w-elapsed').textContent = fmtShort(Math.floor(Math.min(run.elapsedMs, total) / 1000) * 1000);
+  $('w-elapsed').textContent = fmtShort(riddenSecs() * 1000);
   $('w-left').textContent = fmtShort(total - Math.min(run.elapsedMs, total));
   $('w-profile').innerHTML = profileMarkup(w, run.elapsedMs) + liveTrace();
 
